@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      rate_limit_ips: {
+        Row: {
+          expires_at: string
+          id: string
+          ip_hash: string
+          report_count: number
+          window_start: string
+        }
+        Insert: {
+          expires_at?: string
+          id?: string
+          ip_hash: string
+          report_count?: number
+          window_start?: string
+        }
+        Update: {
+          expires_at?: string
+          id?: string
+          ip_hash?: string
+          report_count?: number
+          window_start?: string
+        }
+        Relationships: []
+      }
       reports: {
         Row: {
           approved: boolean
