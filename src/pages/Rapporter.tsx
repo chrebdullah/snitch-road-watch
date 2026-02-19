@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Clock, MapPin } from "lucide-react";
+import { MapPin, Calendar } from "lucide-react";
 
 type Report = {
   id: string;
@@ -9,12 +9,12 @@ type Report = {
   city: string | null;
 };
 
-function timeAgo(dateStr: string): string {
-  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
-  if (diff < 60) return "just nu";
-  if (diff < 3600) return `${Math.floor(diff / 60)} min sedan`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} tim sedan`;
-  return `${Math.floor(diff / 86400)} dagar sedan`;
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("sv-SE", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 }
 
 export default function Rapporter() {
@@ -22,7 +22,7 @@ export default function Rapporter() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetch = async () => {
+    const fetchReports = async () => {
       const { data } = await supabase
         .from("reports")
         .select("id, created_at, masked_reg, city")
@@ -33,7 +33,7 @@ export default function Rapporter() {
       if (data) setReports(data as Report[]);
       setLoading(false);
     };
-    fetch();
+    fetchReports();
   }, []);
 
   return (
@@ -41,10 +41,10 @@ export default function Rapporter() {
       <div className="max-w-2xl mx-auto">
         <div className="mb-10 animate-fade-in">
           <h1 className="text-4xl sm:text-5xl font-display font-black text-white">
-            Rapporter
+            Rapporterade händelser
           </h1>
           <p className="mt-3 text-white/40 text-base">
-            Senaste godkända incidenter. Inga personuppgifter visas.
+            Granskade och godkända händelser. Inga personuppgifter visas.
           </p>
         </div>
 
@@ -58,7 +58,7 @@ export default function Rapporter() {
 
         {!loading && reports.length === 0 && (
           <div className="text-center py-24 text-white/25">
-            <p className="text-lg font-medium">Inga godkända rapporter än</p>
+            <p className="text-lg font-medium">Inga godkända händelser än</p>
             <p className="text-sm mt-2">Var den första att rapportera!</p>
           </div>
         )}
@@ -88,8 +88,8 @@ export default function Rapporter() {
                 </div>
               </div>
               <div className="flex items-center gap-1 text-xs text-white/25 font-medium">
-                <Clock size={11} />
-                {timeAgo(report.created_at)}
+                <Calendar size={11} />
+                {formatDate(report.created_at)}
               </div>
             </div>
           ))}
@@ -97,7 +97,7 @@ export default function Rapporter() {
 
         {!loading && reports.length > 0 && (
           <p className="text-center text-xs text-white/20 mt-8">
-            Visar {reports.length} godkända rapporter
+            Visar {reports.length} godkända händelser · All data är anonymiserad
           </p>
         )}
       </div>

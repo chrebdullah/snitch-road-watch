@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import snitchLogo from "@/assets/snitch-logo.png";
-import { Menu, X } from "lucide-react";
+import { Menu, X, Smartphone } from "lucide-react";
+
+const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
 
 const navLinks = [
   { label: "Hur det funkar", href: "/#how-it-works" },
@@ -16,6 +18,8 @@ export default function Navigation() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const isMobile = /iPhone|Android/i.test(navigator.userAgent);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -31,10 +35,29 @@ export default function Navigation() {
     if (href.startsWith("/#")) {
       const id = href.slice(2);
       if (location.pathname !== "/") {
-        window.location.href = href;
+        navigate("/");
+        setTimeout(() => {
+          document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
         return;
       }
       document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+    }
+    setOpen(false);
+  };
+
+  const handleDonateClick = () => {
+    if (isMobile) {
+      window.location.href = SWISH_DEEP_LINK;
+    } else {
+      if (location.pathname !== "/") {
+        navigate("/");
+        setTimeout(() => {
+          document.getElementById("donation")?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
+      } else {
+        document.getElementById("donation")?.scrollIntoView({ behavior: "smooth" });
+      }
     }
     setOpen(false);
   };
@@ -88,19 +111,13 @@ export default function Navigation() {
 
           {/* Right actions */}
           <div className="flex items-center gap-3">
-            <Link
-              to="/#donation"
-              onClick={() => {
-                if (location.pathname === "/") {
-                  setTimeout(() => {
-                    document.getElementById("donation")?.scrollIntoView({ behavior: "smooth" });
-                  }, 50);
-                }
-              }}
-              className="hidden sm:inline-flex px-4 py-2 bg-white text-black text-sm font-semibold rounded-full hover:bg-white/90 transition-all"
+            <button
+              onClick={handleDonateClick}
+              className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 bg-white text-black text-sm font-semibold rounded-full hover:bg-white/90 transition-all"
             >
+              {isMobile && <Smartphone size={13} />}
               Donera
-            </Link>
+            </button>
             <button
               className="lg:hidden text-white p-1"
               onClick={() => setOpen(!open)}
@@ -135,13 +152,13 @@ export default function Navigation() {
                 </Link>
               )
             )}
-            <Link
-              to="/#donation"
-              className="mt-4 px-8 py-3 bg-white text-black text-lg font-semibold rounded-full"
-              onClick={() => setOpen(false)}
+            <button
+              onClick={handleDonateClick}
+              className="mt-4 inline-flex items-center gap-2 px-8 py-3 bg-white text-black text-lg font-semibold rounded-full"
             >
-              Donera
-            </Link>
+              {isMobile && <Smartphone size={18} />}
+              Donera via Swish
+            </button>
           </div>
         </div>
       )}
