@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import snitchLogo from "@/assets/snitch-logo.png";
+import snitchLogo from "@/assets/logosnitch.png";
 import { Menu, X, Smartphone } from "lucide-react";
 
 const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
@@ -53,10 +53,10 @@ export default function Navigation() {
       if (location.pathname !== "/") {
         navigate("/");
         setTimeout(() => {
-          document.getElementById("donation")?.scrollIntoView({ behavior: "smooth" });
+      document.getElementById("donera")?.scrollIntoView({ behavior: "smooth" });
         }, 100);
       } else {
-        document.getElementById("donation")?.scrollIntoView({ behavior: "smooth" });
+        document.getElementById("donera")?.scrollIntoView({ behavior: "smooth" });
       }
     }
     setOpen(false);
