@@ -44,6 +44,7 @@ export type Database = {
           city: string | null
           created_at: string
           device_metadata: Json | null
+          happened_on: string | null
           id: string
           is_public: boolean
           latitude: number | null
@@ -51,12 +52,14 @@ export type Database = {
           masked_reg: string
           media_url: string | null
           reg_number: string
+          source: string
         }
         Insert: {
           approved?: boolean
           city?: string | null
           created_at?: string
           device_metadata?: Json | null
+          happened_on?: string | null
           id?: string
           is_public?: boolean
           latitude?: number | null
@@ -64,12 +67,14 @@ export type Database = {
           masked_reg: string
           media_url?: string | null
           reg_number: string
+          source?: string
         }
         Update: {
           approved?: boolean
           city?: string | null
           created_at?: string
           device_metadata?: Json | null
+          happened_on?: string | null
           id?: string
           is_public?: boolean
           latitude?: number | null
@@ -77,6 +82,7 @@ export type Database = {
           masked_reg?: string
           media_url?: string | null
           reg_number?: string
+          source?: string
         }
         Relationships: []
       }
