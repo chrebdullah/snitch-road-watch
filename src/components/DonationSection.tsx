@@ -9,7 +9,7 @@ export default function DonationSection() {
   const isMobile = /iPhone|Android/i.test(navigator.userAgent);
 
   return (
-    <section id="donation" className="py-24 px-4 border-t border-white/5">
+    <section id="donera" className="py-24 px-4 border-t border-white/5">
       <div className="max-w-xl mx-auto text-center space-y-8">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs text-white/60 font-medium">
           <Heart size={12} />

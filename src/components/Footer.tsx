@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import snitchLogo from "@/assets/snitch-logo.png";
+import snitchLogo from "@/assets/logosnitch.png";
 
 const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
 
@@ -11,7 +11,7 @@ export default function Footer() {
       // Let the href do the work
     } else {
       e.preventDefault();
-      document.getElementById("donation")?.scrollIntoView({ behavior: "smooth" });
+      document.getElementById("donera")?.scrollIntoView({ behavior: "smooth" });
     }
   };
 
@@ -29,7 +29,7 @@ export default function Footer() {
           <Link to="/rapportera" className="hover:text-white/50 transition-colors">Rapportera</Link>
           <Link to="/rapporter" className="hover:text-white/50 transition-colors">Händelser</Link>
           <a
-            href={isMobile ? SWISH_DEEP_LINK : "/#donation"}
+            href={isMobile ? SWISH_DEEP_LINK : "/#donera"}
             onClick={handleDonate}
             className="hover:text-white/50 transition-colors"
           >
