@@ -1,7 +1,18 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, ChevronDown } from "lucide-react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function HeroSection() {
+  const [reportCount, setReportCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("reports_public")
+      .select("id", { count: "exact", head: true })
+      .then(({ count }) => setReportCount(count ?? 0));
+  }, []);
+
   const scrollToMap = () => {
     document.getElementById("map")?.scrollIntoView({ behavior: "smooth" });
   };
@@ -22,10 +33,12 @@ export default function HeroSection() {
 
       <div className="relative max-w-5xl mx-auto text-center space-y-8 animate-fade-in-up">
         {/* Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs text-white/60 font-medium">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse-slow" />
-          Live – 115 rapporterade incidenter
-        </div>
+        {reportCount !== null && reportCount > 0 && (
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs text-white/60 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse-slow" />
+            Live – {reportCount} rapporterade incidenter
+          </div>
+        )}
 
         {/* Headline */}
         <h1 className="text-5xl sm:text-7xl lg:text-8xl font-display font-black tracking-tighter leading-[0.95] text-white">
@@ -60,13 +73,10 @@ export default function HeroSection() {
         {/* Stats row */}
         <div className="flex flex-wrap items-center justify-center gap-8 pt-8 border-t border-white/5">
           <div className="text-center">
-            <div className="text-3xl font-display font-black text-white">115</div>
+            <div className="text-3xl font-display font-black text-white">
+              {reportCount ?? "–"}
+            </div>
             <div className="text-xs text-white/40 mt-1">Rapporter</div>
-          </div>
-          <div className="w-px h-8 bg-white/10" />
-          <div className="text-center">
-            <div className="text-3xl font-display font-black text-white">24</div>
-            <div className="text-xs text-white/40 mt-1">Städer</div>
           </div>
           <div className="w-px h-8 bg-white/10" />
           <div className="text-center">

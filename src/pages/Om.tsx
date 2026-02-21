@@ -1,4 +1,4 @@
-import snitchLogo from "@/assets/snitch-logo.png";
+import snitchLogo from "@/assets/logosnitch.png";
 import { Smartphone } from "lucide-react";
 
 const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
@@ -11,7 +11,7 @@ export default function Om() {
     <div className="min-h-screen pt-24 pb-16 px-4">
       <div className="max-w-2xl mx-auto animate-fade-in-up">
         <div className="mb-12 text-center">
-          <img src={snitchLogo} alt="SNITCH" className="w-16 h-16 mx-auto invert mb-6" />
+          <img src={snitchLogo} alt="SNITCH" className="w-16 h-16 mx-auto mb-6" />
           <h1 className="text-4xl sm:text-5xl font-display font-black text-white">
             Om SNITCH
           </h1>
@@ -22,7 +22,7 @@ export default function Om() {
             <div className="prose prose-invert max-w-none">
               <p className="text-white/70 text-lg leading-relaxed">
                 Jag heter Emanuel och är 14 år och blev sur när jag nästan blev påkörd av en bil
-                där föraren tittade på sin mobil. När jag förstod att det var olagligt så began
+                där föraren tittade på sin mobil. När jag förstod att det var olagligt så började
                 jag bygga denna lösning.
               </p>
               <p className="text-white/50 text-base leading-relaxed mt-4">
