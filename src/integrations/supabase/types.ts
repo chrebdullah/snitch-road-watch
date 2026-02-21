@@ -106,7 +106,39 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      reports_public: {
+        Row: {
+          city: string | null
+          created_at: string | null
+          happened_on: string | null
+          id: string | null
+          latitude: number | null
+          longitude: number | null
+          masked_reg: string | null
+          source: string | null
+        }
+        Insert: {
+          city?: string | null
+          created_at?: string | null
+          happened_on?: string | null
+          id?: string | null
+          latitude?: number | null
+          longitude?: number | null
+          masked_reg?: string | null
+          source?: string | null
+        }
+        Update: {
+          city?: string | null
+          created_at?: string | null
+          happened_on?: string | null
+          id?: string | null
+          latitude?: number | null
+          longitude?: number | null
+          masked_reg?: string | null
+          source?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       has_role: {
