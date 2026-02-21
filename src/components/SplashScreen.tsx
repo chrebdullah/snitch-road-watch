@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import snitchLogo from "@/assets/snitch-logo.png";
+import snitchLogo from "@/assets/logosnitch.png";
 
 interface SplashScreenProps {
   onContinue: () => void;
