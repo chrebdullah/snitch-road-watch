@@ -19,7 +19,7 @@ export default function Footer() {
     <footer className="border-t border-white/5 py-12 px-4 mt-8">
       <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
         <Link to="/" className="flex items-center gap-2">
-          <img src={snitchLogo} alt="SNITCH" className="w-5 h-5 invert" />
+          <img src={snitchLogo} alt="SNITCH" className="w-5 h-5" />
           <span className="font-display font-black text-sm text-white">SNITCH</span>
         </Link>
 
