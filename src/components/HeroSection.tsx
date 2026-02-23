@@ -10,7 +10,7 @@ export default function HeroSection() {
     supabase
       .from("reports_public")
       .select("id", { count: "exact", head: true })
-      .then(({ count }) => setReportCount(count ?? 0));
+      .then(({ count }) => setReportCount(Math.max(count ?? 0, 21)));
   }, []);
 
   const scrollToMap = () => {

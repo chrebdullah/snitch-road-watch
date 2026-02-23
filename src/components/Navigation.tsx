@@ -75,7 +75,7 @@ export default function Navigation() {
             <img
               src={snitchLogo}
               alt="SNITCH"
-              className="w-7 h-7 object-contain group-hover:scale-110 transition-transform"
+              className="w-9 h-9 object-contain group-hover:scale-110 transition-transform"
             />
             <span className="font-display font-black text-xl tracking-tight text-white">
               SNITCH

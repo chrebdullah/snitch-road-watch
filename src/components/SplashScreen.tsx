@@ -31,7 +31,7 @@ export default function SplashScreen({ onContinue }: SplashScreenProps) {
           <img
             src={snitchLogo}
             alt="SNITCH Logo"
-            className="w-28 h-28 object-contain"
+            className="w-72 h-72 object-contain"
           />
         </div>
 

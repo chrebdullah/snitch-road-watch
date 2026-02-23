@@ -257,18 +257,7 @@ export default function Rapportera() {
             </p>
           </div>
 
-          {/* Public checkbox */}
-          <label className="flex items-start gap-3 cursor-pointer p-4 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
-            <input
-              type="checkbox"
-              checked={allowPublic}
-              onChange={(e) => setAllowPublic(e.target.checked)}
-              className="mt-0.5 w-4 h-4 accent-white"
-            />
-            <span className="text-sm text-white/50 leading-relaxed">
-              Tillåt anonym publicering av händelsen i den publika listan (kräver godkännande)
-            </span>
-          </label>
+          {/* Reports are always anonymous */}
 
           {/* Error */}
           {errorMsg && (

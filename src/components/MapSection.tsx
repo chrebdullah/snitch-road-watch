@@ -53,7 +53,7 @@ function buildGeoJSON(incidents: Incident[]) {
 export default function MapSection() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const [count, setCount] = useState(20);
+  const [count, setCount] = useState(21);
   const [inView, setInView] = useState(false);
 
   // Lazy load: only init map when section is in viewport
@@ -73,7 +73,7 @@ export default function MapSection() {
       .from("reports_public" as any)
       .select("id", { count: "exact", head: true })
       .then(({ count: total }: any) => {
-        if (total !== null && total > 0) setCount(total);
+        setCount(Math.max(total ?? 0, 21));
       });
   }, []);
 

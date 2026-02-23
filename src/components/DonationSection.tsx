@@ -26,7 +26,7 @@ export default function DonationSection() {
 
         <div className="flex flex-col items-center gap-5">
           {isMobile ? (
-            /* Mobile: deep link button + small QR */
+            /* Mobile: deep link only, no QR */
             <>
               <a
                 href={SWISH_DEEP_LINK}
@@ -35,7 +35,6 @@ export default function DonationSection() {
                 <Smartphone size={18} />
                 Donera via Swish
               </a>
-              <p className="text-xs text-white/25">{SWISH_DISPLAY}</p>
             </>
           ) : (
             /* Desktop: QR code + instructions */
