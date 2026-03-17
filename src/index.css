@@ -6,7 +6,7 @@
 
 @layer base {
   :root {
-    --background: 0 0% 0%;
+    --background: 0 0% 4%;
     --foreground: 0 0% 100%;
 
     --card: 0 0% 6%;
@@ -23,6 +23,9 @@
 
     --muted: 0 0% 12%;
     --muted-foreground: 0 0% 55%;
+
+    --accent-brand: 54 100% 50%;
+    --accent-brand-foreground: 0 0% 0%;
 
     --accent: 0 0% 15%;
     --accent-foreground: 0 0% 100%;
@@ -49,8 +52,6 @@
     --snitch-red: 0 72% 51%;
     --snitch-gray: 0 0% 40%;
     --snitch-border: 0 0% 15%;
-    --gradient-hero: linear-gradient(180deg, hsl(0 0% 0%) 0%, hsl(0 0% 4%) 100%);
-    --shadow-glow: 0 0 40px hsl(0 0% 100% / 0.05);
   }
 }
 
@@ -69,6 +70,11 @@
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Space Grotesk', sans-serif;
     font-weight: 700;
+  }
+
+  /* Prevent iOS zoom on input focus */
+  input, select, textarea {
+    font-size: 16px !important;
   }
 }
 
@@ -102,7 +108,7 @@
   }
 
   .text-gradient {
-    background: linear-gradient(135deg, #fff 0%, #888 100%);
+    background: linear-gradient(135deg, #FFE600 0%, #fff 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -128,6 +134,11 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: hsl(0 0% 4%); }
@@ -138,10 +149,27 @@
 .splash-overlay {
   position: fixed;
   inset: 0;
-  background: #000;
+  background: hsl(0 0% 4%);
   z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-direction: column;
+}
+
+.splash-fade-out {
+  animation: fadeOut 0.3s ease-out forwards;
+}
+
+/* Leaflet overrides for dark theme */
+.leaflet-container {
+  background: hsl(0 0% 4%) !important;
+}
+.leaflet-control-attribution {
+  background: rgba(0,0,0,0.6) !important;
+  color: rgba(255,255,255,0.3) !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a {
+  color: rgba(255,255,255,0.4) !important;
 }
