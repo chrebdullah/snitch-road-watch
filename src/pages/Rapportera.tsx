@@ -13,7 +13,7 @@ function validateSwedishReg(reg: string): boolean {
 
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");
-  const [allowPublic, setAllowPublic] = useState(false);
+  
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
