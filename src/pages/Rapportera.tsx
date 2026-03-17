@@ -72,7 +72,7 @@ export default function Rapportera() {
     try {
       const formData = new FormData();
       formData.append("reg_number", cleanReg.replace(/\s/g, ""));
-      formData.append("is_public", String(allowPublic));
+      formData.append("is_public", "false");
       formData.append("website", honeypotValue); // honeypot
       if (location) {
         formData.append("latitude", String(location.lat));
