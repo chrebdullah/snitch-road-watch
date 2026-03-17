@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import snitchLogo from "@/assets/logosnitch.png";
+import snitchMark from "@/assets/snitch-logo.png";
 
 interface SplashScreenProps {
   onContinue: () => void;
@@ -10,32 +11,28 @@ export default function SplashScreen({ onContinue }: SplashScreenProps) {
   const [fadingOut, setFadingOut] = useState(false);
 
   useEffect(() => {
-    const alreadySeen = sessionStorage.getItem("snitch_splash_seen");
-    if (alreadySeen) {
+    const DISPLAY_MS = 420;
+    const FADE_MS = 180;
+
+    const fadeTimer = setTimeout(() => setFadingOut(true), DISPLAY_MS);
+    const doneTimer = setTimeout(() => {
       setVisible(false);
       onContinue();
-      return;
-    }
+    }, DISPLAY_MS + FADE_MS);
 
-    // Auto-dismiss after 600ms
-    const timer = setTimeout(() => {
-      sessionStorage.setItem("snitch_splash_seen", "1");
-      setFadingOut(true);
-      setTimeout(() => {
-        setVisible(false);
-        onContinue();
-      }, 300);
-    }, 600);
-
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(doneTimer);
+    };
   }, [onContinue]);
 
   if (!visible) return null;
 
   return (
-    <div className={`splash-overlay animate-fade-in ${fadingOut ? "splash-fade-out" : ""}`}>
-      <div className="flex items-center justify-center px-6">
-        <img src={snitchLogo} alt="SNITCH" className="w-[240px] max-w-[75vw] h-auto object-contain" />
+    <div className={`splash-overlay ${fadingOut ? "splash-fade-out" : ""}`}>
+      <img src={snitchMark} alt="" aria-hidden="true" className="splash-mascot" />
+      <div className="splash-logo-wrap">
+        <img src={snitchLogo} alt="SNITCH" className="w-[132px] max-w-[45vw] h-auto object-contain" />
       </div>
     </div>
   );
