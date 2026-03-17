@@ -130,12 +130,10 @@ export default function Rapportera() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 animate-fade-in-up">
-          {/* Honeypot */}
           <div className="absolute -left-[9999px] -top-[9999px]" aria-hidden="true">
             <input type="text" name="website" value={honeypotValue} onChange={(e) => setHoneypotValue(e.target.value)} tabIndex={-1} autoComplete="off" />
           </div>
 
-          {/* 1. Registreringsnummer */}
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Registreringsnummer *</label>
             <input
@@ -149,7 +147,6 @@ export default function Rapportera() {
             />
           </div>
 
-          {/* 2. GPS / Plats */}
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Plats *</label>
             <button
@@ -180,7 +177,6 @@ export default function Rapportera() {
             )}
           </div>
 
-          {/* 3. Time */}
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Tidpunkt *</label>
             <div className="flex gap-3">
@@ -213,7 +209,6 @@ export default function Rapportera() {
             )}
           </div>
 
-          {/* Optional: Photo */}
           <div
             className="relative border-2 border-dashed border-border rounded-2xl p-6 text-center cursor-pointer hover:border-foreground/20 transition-colors"
             onClick={() => fileRef.current?.click()}
@@ -235,7 +230,6 @@ export default function Rapportera() {
             )}
           </div>
 
-          {/* Optional: Comment */}
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
@@ -244,14 +238,12 @@ export default function Rapportera() {
             className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors resize-none"
           />
 
-          {/* Error */}
           {errorMsg && (
             <div className="flex items-center gap-2 p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
               <AlertCircle size={16} /> {errorMsg}
             </div>
           )}
 
-          {/* Submit */}
           <button
             type="submit"
             disabled={status === "uploading"}
