@@ -40,8 +40,10 @@ export type Database = {
       }
       reports: {
         Row: {
+          address: string | null
           approved: boolean
           city: string | null
+          comment: string | null
           created_at: string
           device_metadata: Json | null
           happened_on: string | null
@@ -53,10 +55,13 @@ export type Database = {
           media_url: string | null
           reg_number: string
           source: string
+          vehicle_type: string | null
         }
         Insert: {
+          address?: string | null
           approved?: boolean
           city?: string | null
+          comment?: string | null
           created_at?: string
           device_metadata?: Json | null
           happened_on?: string | null
@@ -68,10 +73,13 @@ export type Database = {
           media_url?: string | null
           reg_number: string
           source?: string
+          vehicle_type?: string | null
         }
         Update: {
+          address?: string | null
           approved?: boolean
           city?: string | null
+          comment?: string | null
           created_at?: string
           device_metadata?: Json | null
           happened_on?: string | null
@@ -83,6 +91,7 @@ export type Database = {
           media_url?: string | null
           reg_number?: string
           source?: string
+          vehicle_type?: string | null
         }
         Relationships: []
       }
@@ -116,6 +125,7 @@ export type Database = {
           longitude: number | null
           masked_reg: string | null
           source: string | null
+          vehicle_type: string | null
         }
         Insert: {
           city?: string | null
@@ -126,6 +136,7 @@ export type Database = {
           longitude?: number | null
           masked_reg?: string | null
           source?: string | null
+          vehicle_type?: string | null
         }
         Update: {
           city?: string | null
@@ -136,6 +147,7 @@ export type Database = {
           longitude?: number | null
           masked_reg?: string | null
           source?: string | null
+          vehicle_type?: string | null
         }
         Relationships: []
       }
