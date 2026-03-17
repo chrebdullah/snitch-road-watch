@@ -1,7 +1,7 @@
 import snitchLogo from "@/assets/logosnitch.png";
 import { Smartphone } from "lucide-react";
 
-const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
+const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 const SWISH_QR_PAYLOAD_URL = "https://app.swish.nu/1/p/sw/?sw=0729626225&msg=St%C3%B6d%20SNITCH&edit=msg";
 const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(SWISH_QR_PAYLOAD_URL)}&bgcolor=000000&color=ffffff&margin=12`;
 

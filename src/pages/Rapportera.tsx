@@ -3,7 +3,7 @@ import { Camera, MapPin, Upload, CheckCircle, AlertCircle, Smartphone } from "lu
 
 type Status = "idle" | "uploading" | "success" | "error";
 
-const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%22+46729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A0%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod+SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
+const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");

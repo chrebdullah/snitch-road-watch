@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import snitchLogo from "@/assets/logosnitch.png";
 
-const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
+const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
 export default function Footer() {
   const isMobile = /iPhone|Android/i.test(navigator.userAgent);
@@ -18,9 +18,8 @@ export default function Footer() {
   return (
     <footer className="border-t border-white/5 py-12 px-4 mt-8">
       <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
-        <Link to="/" className="flex items-center gap-2">
-          <img src={snitchLogo} alt="SNITCH" className="w-[84px] h-[84px] object-contain" />
-          <span className="font-display font-black text-sm text-white">SNITCH</span>
+        <Link to="/" className="flex items-center">
+          <img src={snitchLogo} alt="SNITCH" className="h-[96px] w-auto object-contain" />
         </Link>
 
         <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-white/25">

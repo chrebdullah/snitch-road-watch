@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import snitchLogo from "@/assets/logosnitch.png";
 import { Menu, X, Smartphone } from "lucide-react";
 
-const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
+const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
 const navLinks = [
   { label: "Hur det funkar", href: "/#how-it-works" },
@@ -63,13 +63,12 @@ export default function Navigation() {
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "bg-background/95 backdrop-blur-md border-b border-border" : "bg-transparent"}`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 group">
+          <Link to="/" className="flex items-center group">
             <img
               src={snitchLogo}
               alt="SNITCH"
-              className="h-16 w-auto object-contain group-hover:scale-105 transition-transform"
+              className="h-14 w-auto object-contain border-0 shadow-none bg-transparent group-hover:scale-105 transition-transform"
             />
-            <span className="text-white text-[18px] leading-none font-extrabold tracking-wide">SNITCH</span>
           </Link>
 
           <div className="hidden lg:flex items-center gap-7">
