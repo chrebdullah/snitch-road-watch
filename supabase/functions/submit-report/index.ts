@@ -20,7 +20,7 @@ async function hashIP(ip: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function stripExifFromJpeg(buffer: Uint8Array): Uint8Array {
+function stripExifFromJpeg(buffer: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   if (buffer[0] !== 0xff || buffer[1] !== 0xd8) return buffer;
   const result: number[] = [0xff, 0xd8];
   let i = 2;
@@ -38,25 +38,16 @@ function stripExifFromJpeg(buffer: Uint8Array): Uint8Array {
       i += 2 + length;
     }
   }
-  return new Uint8Array(result);
-}
-
-function uint8ToBase64(buffer: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < buffer.length; i += chunkSize) {
-    binary += String.fromCharCode(...buffer.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
+  const normalized = new Uint8Array(result);
+  return new Uint8Array(normalized.buffer.slice(0));
 }
 
 type NotificationPayload = {
   regNumber: string;
-  locationText: string;
-  timeOfReport: string;
-  vehicleType: string | null;
+  addressOrCoordinates: string;
+  createdAt: string;
   comment: string | null;
-  attachment: { filename: string; contentType: string; base64Content: string } | null;
+  photoLink: string | null;
 };
 
 async function sendNotificationEmail(payload: NotificationPayload): Promise<void> {
@@ -72,28 +63,18 @@ async function sendNotificationEmail(payload: NotificationPayload): Promise<void
     "En ny rapport skickades in.",
     "",
     `Registreringsnummer: ${payload.regNumber}`,
-    `Plats: ${payload.locationText}`,
-    `Tidpunkt: ${payload.timeOfReport}`,
-    `Fordonstyp: ${payload.vehicleType || "Ej angiven"}`,
-    `Kommentar: ${payload.comment || "Ingen"}`,
+    `Adress/plats: ${payload.addressOrCoordinates}`,
+    `Tidpunkt: ${payload.createdAt}`,
+    `Kommentar: ${payload.comment?.trim() || "Ingen kommentar"}`,
+    `Foto: ${payload.photoLink || "Ingen bild uppladdad"}`,
   ];
 
   const body: Record<string, unknown> = {
     from: fromAddress,
     to: [toAddress],
-    subject: `Ny SNITCH-rapport: ${payload.regNumber}`,
+    subject: "🚨 Ny rapport inkommen – SNITCH",
     text: lines.join("\n"),
   };
-
-  if (payload.attachment) {
-    body.attachments = [
-      {
-        filename: payload.attachment.filename,
-        content: payload.attachment.base64Content,
-        type: payload.attachment.contentType,
-      },
-    ];
-  }
 
   const response = await fetch(RESEND_ENDPOINT, {
     method: "POST",
@@ -108,6 +89,9 @@ async function sendNotificationEmail(payload: NotificationPayload): Promise<void
     const errorText = await response.text();
     throw new Error(`Resend request failed: ${response.status} ${errorText}`);
   }
+
+  const resendResponse = await response.json();
+  console.log("submit-report email sent", { emailId: resendResponse?.id ?? null, toAddress });
 }
 
 Deno.serve(async (req) => {
@@ -159,7 +143,6 @@ Deno.serve(async (req) => {
 
     // File upload
     let mediaUrl: string | null = null;
-    let notificationAttachment: NotificationPayload["attachment"] = null;
     if (file && file.size > 0) {
       let fileBuffer = new Uint8Array(await file.arrayBuffer());
       const contentType = file.type;
@@ -168,47 +151,51 @@ Deno.serve(async (req) => {
       const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("report-media").upload(fileName, fileBuffer, { contentType });
       if (!uploadError) mediaUrl = fileName;
-      if ((contentType || "").startsWith("image/")) {
-        notificationAttachment = {
-          filename: file.name || `report-image.${ext}`,
-          contentType: contentType || "application/octet-stream",
-          base64Content: uint8ToBase64(fileBuffer),
-        };
-      }
     }
 
     const latitude = latStr ? parseFloat(latStr) : null;
     const longitude = lngStr ? parseFloat(lngStr) : null;
 
-    const { error } = await supabase.from("reports").insert({
-      reg_number: regNumber,
-      masked_reg: "***",
-      vehicle_type: vehicleType || "car",
-      address,
-      comment,
-      latitude,
-      longitude,
-      city: null,
-      media_url: mediaUrl,
-      is_public: false,
-      approved: false,
-      happened_on: happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
-    });
+    const { data: insertedReport, error } = await supabase
+      .from("reports")
+      .insert({
+        reg_number: regNumber,
+        masked_reg: "***",
+        vehicle_type: vehicleType || "car",
+        address,
+        comment,
+        latitude,
+        longitude,
+        city: null,
+        media_url: mediaUrl,
+        is_public: false,
+        approved: false,
+        happened_on: happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
+      })
+      .select("created_at")
+      .single();
 
     if (error) throw error;
 
-    const locationText =
+    const addressOrCoordinates =
       latitude !== null && longitude !== null
         ? `${latitude}, ${longitude}`
         : address || "Ej angiven";
 
+    let photoLink: string | null = null;
+    if (mediaUrl) {
+      const { data: signedPhoto } = await supabase.storage
+        .from("report-media")
+        .createSignedUrl(mediaUrl, 60 * 60 * 24 * 7);
+      photoLink = signedPhoto?.signedUrl ?? null;
+    }
+
     await sendNotificationEmail({
       regNumber,
-      locationText,
-      timeOfReport: happenedAt || new Date().toISOString(),
-      vehicleType,
+      addressOrCoordinates,
+      createdAt: insertedReport?.created_at ?? new Date().toISOString(),
       comment,
-      attachment: notificationAttachment,
+      photoLink,
     });
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
