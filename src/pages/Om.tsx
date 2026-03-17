@@ -1,7 +1,7 @@
 import snitchLogo from "@/assets/logosnitch.png";
 import { Smartphone } from "lucide-react";
 
-const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
+const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(SWISH_DEEP_LINK)}&bgcolor=000000&color=ffffff&margin=12`;
 
 export default function Om() {
@@ -11,7 +11,7 @@ export default function Om() {
     <div className="min-h-screen pt-24 pb-16 px-4">
       <div className="max-w-2xl mx-auto animate-fade-in-up">
         <div className="mb-12 text-center">
-          <img src={snitchLogo} alt="SNITCH" className="w-16 h-16 mx-auto mb-6" />
+          <img src={snitchLogo} alt="SNITCH" className="w-48 h-48 mx-auto mb-6 object-contain" />
           <h1 className="text-4xl sm:text-5xl font-display font-black text-white">
             Om SNITCH
           </h1>

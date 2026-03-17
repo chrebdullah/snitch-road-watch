@@ -10,6 +10,8 @@ const corsHeaders = {
 const RATE_LIMIT = 5;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const IP_SALT = "snitch-salt-2026";
+const RESEND_API_URL = "https://api.resend.com/emails";
+const RESEND_TO = "snitchsweden@gmail.com";
 
 async function hashIP(ip: string): Promise<string> {
   const data = new TextEncoder().encode(IP_SALT + ip);
@@ -36,6 +38,54 @@ function stripExifFromJpeg(buffer: Uint8Array): Uint8Array {
     }
   }
   return new Uint8Array(result);
+}
+
+async function sendNotificationEmail(payload: {
+  reportId: string;
+  createdAt: string;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  comment: string | null;
+  vehicleType: string;
+}) {
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  const resendFrom = Deno.env.get("RESEND_FROM_EMAIL") ?? "SNITCH <onboarding@resend.dev>";
+  if (!resendApiKey) throw new Error("RESEND_API_KEY saknas");
+
+  const locationText = payload.address?.trim()
+    ? payload.address
+    : payload.latitude !== null && payload.longitude !== null
+      ? `${payload.latitude}, ${payload.longitude}`
+      : "Ej angiven";
+
+  const html = `
+    <h2>Ny rapport i SNITCH</h2>
+    <p><strong>Rapport-ID:</strong> ${payload.reportId}</p>
+    <p><strong>Tid:</strong> ${payload.createdAt}</p>
+    <p><strong>Fordonstyp:</strong> ${payload.vehicleType}</p>
+    <p><strong>Plats:</strong> ${locationText}</p>
+    <p><strong>Kommentar:</strong> ${payload.comment?.trim() || "Ingen kommentar"}</p>
+  `;
+
+  const response = await fetch(RESEND_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: resendFrom,
+      to: [RESEND_TO],
+      subject: "Ny SNITCH-rapport mottagen",
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    throw new Error(`Resend misslyckades (${response.status}): ${responseText}`);
+  }
 }
 
 Deno.serve(async (req) => {
@@ -92,22 +142,36 @@ Deno.serve(async (req) => {
     const latitude = latStr ? parseFloat(latStr) : null;
     const longitude = lngStr ? parseFloat(lngStr) : null;
 
-    const { error } = await supabase.from("reports").insert({
-      reg_number: "ANON",
-      masked_reg: "***",
-      vehicle_type: vehicleType,
-      address,
-      comment,
-      latitude,
-      longitude,
-      city: null,
-      media_url: mediaUrl,
-      is_public: false,
-      approved: false,
-      happened_on: happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
-    });
+    const { data: insertedReport, error: insertError } = await supabase
+      .from("reports")
+      .insert({
+        reg_number: "ANON",
+        masked_reg: "***",
+        vehicle_type: vehicleType,
+        address,
+        comment,
+        latitude,
+        longitude,
+        city: null,
+        media_url: mediaUrl,
+        is_public: false,
+        approved: false,
+        happened_on: happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
+      })
+      .select("id, created_at, address, latitude, longitude, comment, vehicle_type")
+      .single();
 
-    if (error) throw error;
+    if (insertError || !insertedReport) throw insertError ?? new Error("Rapport kunde inte skapas");
+
+    await sendNotificationEmail({
+      reportId: insertedReport.id,
+      createdAt: insertedReport.created_at,
+      address: insertedReport.address,
+      latitude: insertedReport.latitude,
+      longitude: insertedReport.longitude,
+      comment: insertedReport.comment,
+      vehicleType: insertedReport.vehicle_type,
+    });
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

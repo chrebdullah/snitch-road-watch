@@ -119,6 +119,8 @@
 .splash-overlay {
   position: fixed;
   inset: 0;
+  width: 100vw;
+  height: 100dvh;
   background: hsl(0 0% 4%);
   z-index: 9999;
   display: flex;

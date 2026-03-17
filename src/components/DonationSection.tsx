@@ -2,7 +2,7 @@ import { Heart, Smartphone } from "lucide-react";
 
 const SWISH_NUMBER = "46729626225";
 const SWISH_DISPLAY = "+46 72-962 62 25";
-const SWISH_DEEP_LINK = `swish://payment?phone=${SWISH_NUMBER}&amount=&message=St%C3%B6d%20SNITCH`;
+const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(SWISH_DEEP_LINK)}&bgcolor=0a0a0a&color=ffffff&margin=8`;
 
 export default function DonationSection() {
