@@ -146,7 +146,7 @@ export default function Rapportera() {
               setFilePreview(null);
               setLocation(null);
               setLocationStatus("idle");
-              setAllowPublic(false);
+              
             }}
             className="px-6 py-3 border border-white/15 text-white/70 text-sm font-medium rounded-full hover:border-white/30 hover:text-white transition-all"
           >
