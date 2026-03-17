@@ -70,9 +70,9 @@ export default function MapSection() {
   // Fetch live count
   useEffect(() => {
     supabase
-      .from("reports_public" as any)
+      .from("reports_public")
       .select("id", { count: "exact", head: true })
-      .then(({ count: total }: any) => {
+      .then(({ count: total }) => {
         setCount(Math.max(total ?? 0, 21));
       });
   }, []);
