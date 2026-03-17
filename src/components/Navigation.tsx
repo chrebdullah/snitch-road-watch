@@ -27,7 +27,9 @@ export default function Navigation() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  useEffect(() => { setOpen(false); }, [location]);
+  useEffect(() => {
+    setOpen(false);
+  }, [location]);
 
   const handleAnchorClick = (href: string) => {
     if (href.startsWith("/#")) {
@@ -58,30 +60,48 @@ export default function Navigation() {
 
   return (
     <>
-      <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "bg-background/95 backdrop-blur-md border-b border-border" : "bg-transparent"}`}>
+      <nav
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "bg-background/95 backdrop-blur-md border-b border-border" : "bg-transparent"}`}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center group">
+          <Link to="/" className="flex items-center gap-2 group">
             <span className="inline-flex items-center justify-center h-12 min-h-[44px] px-2 rounded-md bg-black/75 ring-1 ring-white/20 shadow-[0_0_14px_rgba(0,0,0,0.45)]">
-              <img src={snitchLogo} alt="SNITCH" className="h-11 w-auto object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.35)] group-hover:scale-105 transition-transform" />
+              <img
+                src={snitchLogo}
+                alt="SNITCH"
+                className="h-8 w-auto object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.35)] group-hover:scale-105 transition-transform"
+              />
             </span>
+            <span className="text-white text-[18px] leading-none font-extrabold tracking-wide">SNITCH</span>
           </Link>
 
           <div className="hidden lg:flex items-center gap-7">
             {navLinks.map((link) =>
               link.href.startsWith("/#") ? (
-                <button key={link.label} onClick={() => handleAnchorClick(link.href)} className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium">
+                <button
+                  key={link.label}
+                  onClick={() => handleAnchorClick(link.href)}
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium"
+                >
                   {link.label}
                 </button>
               ) : (
-                <Link key={link.label} to={link.href} className={`text-sm font-medium transition-colors ${location.pathname === link.href ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                <Link
+                  key={link.label}
+                  to={link.href}
+                  className={`text-sm font-medium transition-colors ${location.pathname === link.href ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
                   {link.label}
                 </Link>
-              )
+              ),
             )}
           </div>
 
           <div className="flex items-center gap-3">
-            <button onClick={handleDonateClick} className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 min-h-[48px] bg-accent-brand text-accent-brand-foreground text-sm font-semibold rounded-full hover:opacity-90 transition-all">
+            <button
+              onClick={handleDonateClick}
+              className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 min-h-[48px] bg-accent-brand text-accent-brand-foreground text-sm font-semibold rounded-full hover:opacity-90 transition-all"
+            >
               {isMobile && <Smartphone size={13} />}
               Donera
             </button>
@@ -97,16 +117,27 @@ export default function Navigation() {
           <div className="flex flex-col items-center justify-center h-full gap-8 px-6">
             {navLinks.map((link) =>
               link.href.startsWith("/#") ? (
-                <button key={link.label} onClick={() => handleAnchorClick(link.href)} className="text-2xl font-display font-bold text-foreground/80 hover:text-foreground transition-colors">
+                <button
+                  key={link.label}
+                  onClick={() => handleAnchorClick(link.href)}
+                  className="text-2xl font-display font-bold text-foreground/80 hover:text-foreground transition-colors"
+                >
                   {link.label}
                 </button>
               ) : (
-                <Link key={link.label} to={link.href} className="text-2xl font-display font-bold text-foreground/80 hover:text-foreground transition-colors">
+                <Link
+                  key={link.label}
+                  to={link.href}
+                  className="text-2xl font-display font-bold text-foreground/80 hover:text-foreground transition-colors"
+                >
                   {link.label}
                 </Link>
-              )
+              ),
             )}
-            <button onClick={handleDonateClick} className="mt-4 inline-flex items-center gap-2 px-8 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground text-lg font-semibold rounded-full">
+            <button
+              onClick={handleDonateClick}
+              className="mt-4 inline-flex items-center gap-2 px-8 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground text-lg font-semibold rounded-full"
+            >
               {isMobile && <Smartphone size={18} />}
               Donera via Swish
             </button>

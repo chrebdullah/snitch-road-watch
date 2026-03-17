@@ -117,6 +117,7 @@ export type Database = {
     Views: {
       reports_public: {
         Row: {
+          address: string | null
           city: string | null
           created_at: string | null
           happened_on: string | null
@@ -128,6 +129,7 @@ export type Database = {
           vehicle_type: string | null
         }
         Insert: {
+          address?: string | null
           city?: string | null
           created_at?: string | null
           happened_on?: string | null
@@ -139,6 +141,7 @@ export type Database = {
           vehicle_type?: string | null
         }
         Update: {
+          address?: string | null
           city?: string | null
           created_at?: string | null
           happened_on?: string | null

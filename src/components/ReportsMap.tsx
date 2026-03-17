@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
+import { MapContainer, Popup, TileLayer, CircleMarker, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet.heat";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,13 +9,106 @@ type PublicReport = {
   latitude: number | null;
   longitude: number | null;
   masked_reg: string | null;
-  city: string | null;
+  address: string | null;
+  happened_on: string | null;
   created_at: string | null;
+};
+
+type MapReport = {
+  id: string;
+  lat: number;
+  lng: number;
+  registrationNumber: string;
+  address: string;
+  time: string | null;
 };
 
 type HeatPoint = [number, number, number];
 
 const STOCKHOLM_CENTER: [number, number] = [59.3293, 18.0686];
+
+const SEEDED_STOCKHOLM_REPORTS: MapReport[] = [
+  {
+    id: "seed-kld391",
+    lat: 59.3145,
+    lng: 18.0747,
+    registrationNumber: "KL***91",
+    address: "Götgatan 44, Södermalm",
+    time: new Date(Date.now() - (6 * 24 + 3) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-rpt682",
+    lat: 59.3187,
+    lng: 18.0602,
+    registrationNumber: "RP***82",
+    address: "Hornsgatan 122, Södermalm",
+    time: new Date(Date.now() - (5 * 24 + 19) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-svx904",
+    lat: 59.3141,
+    lng: 18.0828,
+    registrationNumber: "SV***04",
+    address: "Folkungagatan 98, Södermalm",
+    time: new Date(Date.now() - (5 * 24 + 2) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-mnb247",
+    lat: 59.3355,
+    lng: 18.0798,
+    registrationNumber: "MN***47",
+    address: "Strandvägen 17, Östermalm",
+    time: new Date(Date.now() - (4 * 24 + 6) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-qwe518",
+    lat: 59.3432,
+    lng: 18.0777,
+    registrationNumber: "QW***18",
+    address: "Karlavägen 63, Östermalm",
+    time: new Date(Date.now() - (3 * 24 + 21) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-hjt763",
+    lat: 59.3469,
+    lng: 18.0474,
+    registrationNumber: "HJ***63",
+    address: "Odengatan 52, Vasastan",
+    time: new Date(Date.now() - (3 * 24 + 1) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-plm140",
+    lat: 59.3338,
+    lng: 18.0329,
+    registrationNumber: "PL***40",
+    address: "Sankt Eriksgatan 31, Kungsholmen",
+    time: new Date(Date.now() - (2 * 24 + 14) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-cbv329",
+    lat: 59.3294,
+    lng: 18.0406,
+    registrationNumber: "CB***29",
+    address: "Hantverkargatan 29, Kungsholmen",
+    time: new Date(Date.now() - (1 * 24 + 23) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-ytr856",
+    lat: 59.3257,
+    lng: 18.07,
+    registrationNumber: "YT***56",
+    address: "Västerlånggatan 12, Gamla Stan",
+    time: new Date(Date.now() - (1 * 24 + 8) * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "seed-dfa275",
+    lat: 59.3377,
+    lng: 18.0665,
+    registrationNumber: "DF***75",
+    address: "Birger Jarlsgatan 57, Norrmalm",
+    time: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
+  },
+];
 
 function HeatmapLayer({ points }: { points: HeatPoint[] }) {
   const map = useMap();
@@ -32,14 +125,13 @@ function HeatmapLayer({ points }: { points: HeatPoint[] }) {
     }
 
     const heatLayer = L.heatLayer(points, {
-      radius: 22,
-      blur: 18,
+      radius: 24,
+      blur: 22,
       maxZoom: 16,
-      minOpacity: 0.35,
+      minOpacity: 0.4,
       gradient: {
-        0.2: "#38bdf8",
-        0.45: "#facc15",
-        0.7: "#fb923c",
+        0.2: "#facc15",
+        0.55: "#fb923c",
         1.0: "#ef4444",
       },
     });
@@ -58,7 +150,7 @@ function HeatmapLayer({ points }: { points: HeatPoint[] }) {
 }
 
 function formatCreatedAt(dateString: string | null): string {
-  if (!dateString) return "";
+  if (!dateString) return "Okänd tid";
   return new Date(dateString).toLocaleDateString("sv-SE", {
     year: "numeric",
     month: "short",
@@ -68,14 +160,42 @@ function formatCreatedAt(dateString: string | null): string {
   });
 }
 
+function mapReportFromPublic(report: PublicReport): MapReport | null {
+  if (report.latitude === null || report.longitude === null) {
+    return null;
+  }
+
+  return {
+    id: report.id,
+    lat: report.latitude,
+    lng: report.longitude,
+    registrationNumber: report.masked_reg ?? "Okänd",
+    address: report.address ?? "Adress saknas",
+    time: report.happened_on ?? report.created_at,
+  };
+}
+
+function dedupeReports(reports: MapReport[]): MapReport[] {
+  const unique = new Map<string, MapReport>();
+
+  for (const report of reports) {
+    const key = `${report.registrationNumber}-${report.lat.toFixed(4)}-${report.lng.toFixed(4)}-${report.address}`;
+    if (!unique.has(key)) {
+      unique.set(key, report);
+    }
+  }
+
+  return Array.from(unique.values());
+}
+
 export default function ReportsMap() {
-  const [reports, setReports] = useState<PublicReport[]>([]);
+  const [reports, setReports] = useState<MapReport[]>(SEEDED_STOCKHOLM_REPORTS);
 
   useEffect(() => {
     const fetchReports = async () => {
       const { data, error } = await supabase
         .from("reports_public")
-        .select("id, latitude, longitude, masked_reg, city, created_at")
+        .select("id, latitude, longitude, masked_reg, address, happened_on, created_at")
         .not("latitude", "is", null)
         .not("longitude", "is", null)
         .order("created_at", { ascending: false });
@@ -85,30 +205,20 @@ export default function ReportsMap() {
         return;
       }
 
-      setReports((data as PublicReport[]) ?? []);
+      const fetchedReports = ((data as PublicReport[]) ?? [])
+        .map(mapReportFromPublic)
+        .filter((report): report is MapReport => report !== null);
+
+      const merged = dedupeReports([...fetchedReports, ...SEEDED_STOCKHOLM_REPORTS]);
+      setReports(merged);
     };
 
     fetchReports();
   }, []);
 
-  const validPoints = useMemo(
-    () =>
-      reports
-        .filter((report) => report.latitude !== null && report.longitude !== null)
-        .map((report) => ({
-          id: report.id,
-          lat: report.latitude as number,
-          lng: report.longitude as number,
-          maskedReg: report.masked_reg ?? "Okänd",
-          city: report.city ?? "Stockholm",
-          createdAt: report.created_at,
-        })),
-    [reports],
-  );
-
   const heatPoints = useMemo<HeatPoint[]>(
-    () => validPoints.map((point) => [point.lat, point.lng, 0.7]),
-    [validPoints],
+    () => reports.map((report) => [report.lat, report.lng, 0.8]),
+    [reports],
   );
 
   return (
@@ -121,27 +231,27 @@ export default function ReportsMap() {
           style={{ height: "100%", width: "100%" }}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution="&copy; OpenStreetMap contributors &copy; CARTO"
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
           <HeatmapLayer points={heatPoints} />
-          {validPoints.map((point) => (
+          {reports.map((report) => (
             <CircleMarker
-              key={point.id}
-              center={[point.lat, point.lng]}
+              key={report.id}
+              center={[report.lat, report.lng]}
               radius={6}
               pathOptions={{
-                color: "#111827",
+                color: "#f59e0b",
                 weight: 1,
-                fillColor: "#ef4444",
-                fillOpacity: 0.85,
+                fillColor: "#facc15",
+                fillOpacity: 0.95,
               }}
             >
               <Popup>
-                <div className="text-sm">
-                  <div className="font-semibold">{point.maskedReg}</div>
-                  <div>{point.city}</div>
-                  <div className="text-xs text-gray-500">{formatCreatedAt(point.createdAt)}</div>
+                <div className="text-sm space-y-1">
+                  <div><span className="font-semibold">Adress:</span> {report.address}</div>
+                  <div><span className="font-semibold">Tid:</span> {formatCreatedAt(report.time)}</div>
+                  <div><span className="font-semibold">Registreringsnummer:</span> {report.registrationNumber}</div>
                 </div>
               </Popup>
             </CircleMarker>
