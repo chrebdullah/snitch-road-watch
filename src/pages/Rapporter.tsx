@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MapPin, Calendar } from "lucide-react";
+import ReportsMap from "@/components/ReportsMap";
 
 type Report = {
   id: string;
@@ -44,6 +45,10 @@ export default function Rapporter() {
           <p className="mt-3 text-white/40 text-base">
             Granskade och godkända händelser. Inga personuppgifter visas.
           </p>
+        </div>
+
+        <div className="mb-10 animate-fade-in-up">
+          <ReportsMap />
         </div>
 
         {loading && (
