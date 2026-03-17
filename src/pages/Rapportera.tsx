@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { Camera, MapPin, Upload, CheckCircle, AlertCircle, Smartphone, Car, Truck, Bus } from "lucide-react";
+import { Camera, MapPin, Upload, CheckCircle, AlertCircle, Smartphone } from "lucide-react";
 
 type Status = "idle" | "uploading" | "success" | "error";
-type VehicleType = "car" | "truck" | "bus";
 
 const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
 
 export default function Rapportera() {
-  const [vehicleType, setVehicleType] = useState<VehicleType>("car");
+  const [regNumber, setRegNumber] = useState("");
   const [comment, setComment] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
@@ -22,7 +21,6 @@ export default function Rapportera() {
   const fileRef = useRef<HTMLInputElement>(null);
   const isMobile = /iPhone|Android/i.test(navigator.userAgent);
 
-  // Auto-request GPS on mount
   useEffect(() => {
     requestLocation();
   }, []);
@@ -50,6 +48,11 @@ export default function Rapportera() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!regNumber.trim()) {
+      setErrorMsg("Registreringsnummer krävs.");
+      return;
+    }
+
     if (!location && !address.trim()) {
       setErrorMsg("Plats krävs. Tillåt GPS eller ange en adress.");
       return;
@@ -60,7 +63,7 @@ export default function Rapportera() {
 
     try {
       const formData = new FormData();
-      formData.append("vehicle_type", vehicleType);
+      formData.append("reg_number", regNumber.trim().toUpperCase());
       formData.append("website", honeypotValue);
       if (location) {
         formData.append("latitude", String(location.lat));
@@ -100,7 +103,7 @@ export default function Rapportera() {
           </h1>
           <p className="text-muted-foreground">Behandlas anonymt och konfidentiellt.</p>
           {isMobile && (
-            <a
+            
               href={SWISH_DEEP_LINK}
               className="inline-flex items-center gap-2 px-6 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground font-bold text-sm rounded-full transition-all"
             >
@@ -108,7 +111,7 @@ export default function Rapportera() {
             </a>
           )}
           <button
-            onClick={() => { setStatus("idle"); setFile(null); setFilePreview(null); setComment(""); setHappenedNow(true); }}
+            onClick={() => { setStatus("idle"); setFile(null); setFilePreview(null); setComment(""); setRegNumber(""); setHappenedNow(true); }}
             className="px-6 py-3 min-h-[48px] border border-border text-muted-foreground text-sm font-medium rounded-full hover:border-foreground/30 hover:text-foreground transition-all"
           >
             Skicka en ny rapport
@@ -117,12 +120,6 @@ export default function Rapportera() {
       </div>
     );
   }
-
-  const vehicles: { type: VehicleType; icon: typeof Car; label: string }[] = [
-    { type: "car", icon: Car, label: "Bil" },
-    { type: "truck", icon: Truck, label: "Lastbil" },
-    { type: "bus", icon: Bus, label: "Buss" },
-  ];
 
   return (
     <div className="min-h-screen pt-24 pb-16 px-4">
@@ -138,7 +135,21 @@ export default function Rapportera() {
             <input type="text" name="website" value={honeypotValue} onChange={(e) => setHoneypotValue(e.target.value)} tabIndex={-1} autoComplete="off" />
           </div>
 
-          {/* 1. GPS / Plats */}
+          {/* 1. Registreringsnummer */}
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Registreringsnummer *</label>
+            <input
+              type="text"
+              value={regNumber}
+              onChange={(e) => setRegNumber(e.target.value.toUpperCase())}
+              placeholder="ABC 123"
+              maxLength={10}
+              autoCapitalize="characters"
+              className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 min-h-[56px] text-foreground text-xl font-bold tracking-widest placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors"
+            />
+          </div>
+
+          {/* 2. GPS / Plats */}
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Plats *</label>
             <button
@@ -167,28 +178,6 @@ export default function Rapportera() {
                 className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 min-h-[48px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors"
               />
             )}
-          </div>
-
-          {/* 2. Vehicle type - big tap targets */}
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Fordonstyp *</label>
-            <div className="grid grid-cols-3 gap-3">
-              {vehicles.map((v) => (
-                <button
-                  key={v.type}
-                  type="button"
-                  onClick={() => setVehicleType(v.type)}
-                  className={`flex flex-col items-center justify-center gap-2 p-4 min-h-[80px] rounded-xl border transition-all font-medium ${
-                    vehicleType === v.type
-                      ? "border-accent-brand bg-accent-brand/10 text-accent-brand"
-                      : "border-border text-muted-foreground hover:border-foreground/20"
-                  }`}
-                >
-                  <v.icon size={24} />
-                  <span className="text-sm">{v.label}</span>
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* 3. Time */}
