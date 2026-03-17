@@ -60,9 +60,8 @@ export default function Navigation() {
     <>
       <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "bg-background/95 backdrop-blur-md border-b border-border" : "bg-transparent"}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5 group">
-            <img src={snitchLogo} alt="SNITCH" className="w-9 h-9 object-contain group-hover:scale-110 transition-transform" />
-            <span className="font-display font-black text-xl tracking-tight text-foreground">SNITCH</span>
+          <Link to="/" className="flex items-center group">
+            <img src={snitchLogo} alt="SNITCH" className="h-10 w-auto object-contain group-hover:scale-110 transition-transform" />
           </Link>
 
           <div className="hidden lg:flex items-center gap-7">

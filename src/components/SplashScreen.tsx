@@ -34,14 +34,8 @@ export default function SplashScreen({ onContinue }: SplashScreenProps) {
 
   return (
     <div className={`splash-overlay animate-fade-in ${fadingOut ? "splash-fade-out" : ""}`}>
-      <div className="flex flex-col items-center gap-6 px-6 text-center">
-        <img src={snitchLogo} alt="SNITCH" className="w-32 h-32 object-contain" />
-        <h1 className="text-4xl font-display font-black tracking-tighter text-foreground">
-          SNITCH
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Säkrare vägar, en rapport i taget
-        </p>
+      <div className="flex items-center justify-center px-6">
+        <img src={snitchLogo} alt="SNITCH" className="w-[240px] max-w-[75vw] h-auto object-contain" />
       </div>
     </div>
   );
