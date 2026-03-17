@@ -118,6 +118,7 @@ export type Database = {
       reports_public: {
         Row: {
           address: string | null
+          approved: boolean | null
           city: string | null
           comment: string | null
           created_at: string | null
@@ -132,6 +133,7 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          approved?: boolean | null
           city?: string | null
           comment?: string | null
           created_at?: string | null
@@ -146,6 +148,7 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          approved?: boolean | null
           city?: string | null
           comment?: string | null
           created_at?: string | null

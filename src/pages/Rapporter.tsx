@@ -14,6 +14,7 @@ type PublicReport = {
   id: string | null;
   created_at: string | null;
   happened_on: string | null;
+  approved: boolean | null;
   masked_reg: string | null;
   address: string | null;
   city: string | null;
@@ -106,11 +107,18 @@ export default function Rapporter() {
 
   useEffect(() => {
     const fetchReports = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("reports_public")
-        .select("id, created_at, happened_on, masked_reg, address, city, latitude, longitude, comment, media_url")
+        .select("id, created_at, happened_on, approved, masked_reg, address, city, latitude, longitude, comment, media_url")
+        .eq("approved", true)
         .order("created_at", { ascending: false })
         .limit(200);
+
+      console.log("[Rapporter] reports_public query result", { data, error });
+
+      if (error) {
+        console.error("[Rapporter] Failed to fetch approved reports", error);
+      }
 
       if (data) {
         setReports((data as PublicReport[]).map(toUiReport));
