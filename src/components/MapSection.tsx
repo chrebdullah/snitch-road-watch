@@ -70,9 +70,9 @@ export default function MapSection() {
   // Fetch live count
   useEffect(() => {
     supabase
-      .from("reports_public" as any)
+      .from("reports_public")
       .select("id", { count: "exact", head: true })
-      .then(({ count: total }: any) => {
+      .then(({ count: total }) => {
         setCount(Math.max(total ?? 0, 21));
       });
   }, []);
@@ -100,9 +100,9 @@ export default function MapSection() {
     map.on("load", async () => {
       // Fetch live approved incidents with coordinates and city
       const { data: liveData } = await supabase
-        .from("reports_public" as any)
+        .from("reports_public")
         .select("id, latitude, longitude, city")
-        .not("latitude", "is", null) as any;
+        .not("latitude", "is", null);
 
       const livePoints: Incident[] = (liveData || [])
         .filter((r: any) => r.latitude && r.longitude)

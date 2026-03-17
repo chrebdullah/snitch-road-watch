@@ -24,11 +24,11 @@ export default function Rapporter() {
   useEffect(() => {
     const fetchReports = async () => {
       const { data } = await supabase
-        .from("reports_public" as any)
+        .from("reports_public")
         .select("id, created_at, masked_reg, city")
         .order("created_at", { ascending: false })
         .limit(100);
-      if (data) setReports(data as unknown as Report[]);
+      if (data) setReports(data as Report[]);
       setLoading(false);
     };
     fetchReports();

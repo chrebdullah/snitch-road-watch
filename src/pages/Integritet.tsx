@@ -8,7 +8,7 @@ const bulletPoints = [
   "Publik vy visar endast grov plats (stad/kommun) och datum, aldrig exakt klockslag",
   "Media publiceras aldrig automatiskt – kräver manuellt adminbeslut",
   "Alla rapporter granskas av administratör innan eventuell publicering",
-  "Rapporter lagras i max 90 dagar utan adminåtgärd, därefter automatisk radering",
+  "Alla rapporter granskas manuellt innan eventuell publicering i det publika flödet",
 ];
 
 const sections = [

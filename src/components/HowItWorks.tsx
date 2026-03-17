@@ -5,7 +5,7 @@ const steps = [
     icon: Camera,
     number: "01",
     title: "Ta bild eller video",
-    description: "Fotografera eller filma fordonet med din kamera. Metadata extraheras automatiskt.",
+    description: "Fotografera eller filma fordonet med din kamera. EXIF-metadata rensas automatiskt.",
   },
   {
     icon: FileText,

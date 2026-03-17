@@ -13,7 +13,7 @@ function validateSwedishReg(reg: string): boolean {
 
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");
-  const [allowPublic, setAllowPublic] = useState(false);
+  
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -72,7 +72,7 @@ export default function Rapportera() {
     try {
       const formData = new FormData();
       formData.append("reg_number", cleanReg.replace(/\s/g, ""));
-      formData.append("is_public", String(allowPublic));
+      formData.append("is_public", "false");
       formData.append("website", honeypotValue); // honeypot
       if (location) {
         formData.append("latitude", String(location.lat));
@@ -146,7 +146,7 @@ export default function Rapportera() {
               setFilePreview(null);
               setLocation(null);
               setLocationStatus("idle");
-              setAllowPublic(false);
+              
             }}
             className="px-6 py-3 border border-white/15 text-white/70 text-sm font-medium rounded-full hover:border-white/30 hover:text-white transition-all"
           >
