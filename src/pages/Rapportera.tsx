@@ -3,7 +3,7 @@ import { Camera, MapPin, Upload, CheckCircle, AlertCircle, Smartphone } from "lu
 
 type Status = "idle" | "uploading" | "success" | "error";
 
-const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
+const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");
@@ -103,10 +103,7 @@ export default function Rapportera() {
           </h1>
           <p className="text-muted-foreground">Behandlas anonymt och konfidentiellt.</p>
           {isMobile && (
-            
-              href={SWISH_DEEP_LINK}
-              className="inline-flex items-center gap-2 px-6 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground font-bold text-sm rounded-full transition-all"
-            >
+            <a href={SWISH_DEEP_LINK} className="inline-flex items-center gap-2 px-6 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground font-bold text-sm rounded-full transition-all">
               <Smartphone size={15} /> Stöd via Swish
             </a>
           )}
@@ -156,7 +153,7 @@ export default function Rapportera() {
                 locationStatus === "granted"
                   ? "border-green-500/30 bg-green-500/10 text-green-400"
                   : locationStatus === "denied"
-                  ? "border-destructive/30 bg-destructive/10 text-destructive"
+                  ? "border-border bg-secondary text-muted-foreground"
                   : "border-border text-muted-foreground hover:border-foreground/30"
               }`}
             >
@@ -164,7 +161,7 @@ export default function Rapportera() {
               {locationStatus === "idle" && "Hämta GPS-plats"}
               {locationStatus === "loading" && "Hämtar..."}
               {locationStatus === "granted" && "✓ Plats registrerad"}
-              {locationStatus === "denied" && "GPS nekad – ange adress nedan"}
+              {locationStatus === "denied" && "GPS ej tillgänglig – ange adress nedan"}
             </button>
             {locationStatus === "denied" && (
               <input
@@ -180,39 +177,19 @@ export default function Rapportera() {
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Tidpunkt *</label>
             <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setHappenedNow(true)}
-                className={`flex-1 px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${
-                  happenedNow ? "border-accent-brand bg-accent-brand/10 text-accent-brand" : "border-border text-muted-foreground"
-                }`}
-              >
+              <button type="button" onClick={() => setHappenedNow(true)} className={`flex-1 px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${happenedNow ? "border-accent-brand bg-accent-brand/10 text-accent-brand" : "border-border text-muted-foreground"}`}>
                 Just nu
               </button>
-              <button
-                type="button"
-                onClick={() => setHappenedNow(false)}
-                className={`flex-1 px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${
-                  !happenedNow ? "border-accent-brand bg-accent-brand/10 text-accent-brand" : "border-border text-muted-foreground"
-                }`}
-              >
+              <button type="button" onClick={() => setHappenedNow(false)} className={`flex-1 px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${!happenedNow ? "border-accent-brand bg-accent-brand/10 text-accent-brand" : "border-border text-muted-foreground"}`}>
                 Annan tid
               </button>
             </div>
             {!happenedNow && (
-              <input
-                type="datetime-local"
-                value={happenedAt}
-                onChange={(e) => setHappenedAt(e.target.value)}
-                className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 min-h-[48px] text-foreground focus:outline-none focus:border-foreground/30 transition-colors"
-              />
+              <input type="datetime-local" value={happenedAt} onChange={(e) => setHappenedAt(e.target.value)} className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 min-h-[48px] text-foreground focus:outline-none focus:border-foreground/30 transition-colors" />
             )}
           </div>
 
-          <div
-            className="relative border-2 border-dashed border-border rounded-2xl p-6 text-center cursor-pointer hover:border-foreground/20 transition-colors"
-            onClick={() => fileRef.current?.click()}
-          >
+          <div className="relative border-2 border-dashed border-border rounded-2xl p-6 text-center cursor-pointer hover:border-foreground/20 transition-colors" onClick={() => fileRef.current?.click()}>
             <input ref={fileRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleFile} />
             {filePreview ? (
               <img src={filePreview} alt="Preview" className="max-h-36 mx-auto rounded-xl object-cover" />
@@ -230,13 +207,7 @@ export default function Rapportera() {
             )}
           </div>
 
-          <textarea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="Kommentar (valfritt)"
-            rows={2}
-            className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors resize-none"
-          />
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Kommentar (valfritt)" rows={2} className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors resize-none" />
 
           {errorMsg && (
             <div className="flex items-center gap-2 p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
@@ -244,11 +215,7 @@ export default function Rapportera() {
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={status === "uploading"}
-            className="w-full py-4 min-h-[56px] bg-accent-brand text-accent-brand-foreground font-bold text-lg rounded-full hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50"
-          >
+          <button type="submit" disabled={status === "uploading"} className="w-full py-4 min-h-[56px] bg-accent-brand text-accent-brand-foreground font-bold text-lg rounded-full hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50">
             {status === "uploading" ? "Skickar..." : "SKICKA RAPPORT"}
           </button>
 
