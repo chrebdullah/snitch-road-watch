@@ -7,9 +7,12 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const RATE_LIMIT = 5;
+const RATE_LIMIT = 10;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const IP_SALT = "snitch-salt-2026";
+const RESEND_ENDPOINT = "https://api.resend.com/emails";
+const DEFAULT_NOTIFICATION_TO = "snitchsweden@gmail.com";
+const DEFAULT_NOTIFICATION_FROM = "SNITCH Reports <onboarding@resend.dev>";
 
 async function hashIP(ip: string): Promise<string> {
   const data = new TextEncoder().encode(IP_SALT + ip);
@@ -38,6 +41,75 @@ function stripExifFromJpeg(buffer: Uint8Array): Uint8Array {
   return new Uint8Array(result);
 }
 
+function uint8ToBase64(buffer: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < buffer.length; i += chunkSize) {
+    binary += String.fromCharCode(...buffer.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+type NotificationPayload = {
+  regNumber: string;
+  locationText: string;
+  timeOfReport: string;
+  vehicleType: string | null;
+  comment: string | null;
+  attachment: { filename: string; contentType: string; base64Content: string } | null;
+};
+
+async function sendNotificationEmail(payload: NotificationPayload): Promise<void> {
+  const resendKey = Deno.env.get("RESEND_API_KEY");
+  if (!resendKey) {
+    throw new Error("RESEND_API_KEY is missing");
+  }
+
+  const toAddress = Deno.env.get("REPORT_NOTIFICATION_TO") || DEFAULT_NOTIFICATION_TO;
+  const fromAddress = Deno.env.get("REPORT_NOTIFICATION_FROM") || DEFAULT_NOTIFICATION_FROM;
+
+  const lines = [
+    "En ny rapport skickades in.",
+    "",
+    `Registreringsnummer: ${payload.regNumber}`,
+    `Plats: ${payload.locationText}`,
+    `Tidpunkt: ${payload.timeOfReport}`,
+    `Fordonstyp: ${payload.vehicleType || "Ej angiven"}`,
+    `Kommentar: ${payload.comment || "Ingen"}`,
+  ];
+
+  const body: Record<string, unknown> = {
+    from: fromAddress,
+    to: [toAddress],
+    subject: `Ny SNITCH-rapport: ${payload.regNumber}`,
+    text: lines.join("\n"),
+  };
+
+  if (payload.attachment) {
+    body.attachments = [
+      {
+        filename: payload.attachment.filename,
+        content: payload.attachment.base64Content,
+        type: payload.attachment.contentType,
+      },
+    ];
+  }
+
+  const response = await fetch(RESEND_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Resend request failed: ${response.status} ${errorText}`);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -60,7 +132,7 @@ Deno.serve(async (req) => {
 
     if (rateData) {
       if (rateData.report_count >= RATE_LIMIT) {
-        return new Response(JSON.stringify({ error: "Max 5 rapporter per timme. Försök igen senare." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: "Max 10 rapporter per timme. Försök igen senare." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await supabase.from("rate_limit_ips").update({ report_count: rateData.report_count + 1 }).eq("id", rateData.id);
     } else {
@@ -69,7 +141,8 @@ Deno.serve(async (req) => {
     }
 
     // Parse fields
-    const vehicleType = (formData.get("vehicle_type") as string) || "car";
+    const regNumber = ((formData.get("reg_number") as string) || "").trim().toUpperCase();
+    const vehicleType = (formData.get("vehicle_type") as string) || null;
     const latStr = formData.get("latitude") as string;
     const lngStr = formData.get("longitude") as string;
     const address = (formData.get("address") as string) || null;
@@ -77,8 +150,16 @@ Deno.serve(async (req) => {
     const happenedAt = formData.get("happened_at") as string;
     const file = formData.get("file") as File | null;
 
+    if (!regNumber) {
+      return new Response(JSON.stringify({ error: "Registreringsnummer krävs." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // File upload
     let mediaUrl: string | null = null;
+    let notificationAttachment: NotificationPayload["attachment"] = null;
     if (file && file.size > 0) {
       let fileBuffer = new Uint8Array(await file.arrayBuffer());
       const contentType = file.type;
@@ -87,15 +168,22 @@ Deno.serve(async (req) => {
       const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("report-media").upload(fileName, fileBuffer, { contentType });
       if (!uploadError) mediaUrl = fileName;
+      if ((contentType || "").startsWith("image/")) {
+        notificationAttachment = {
+          filename: file.name || `report-image.${ext}`,
+          contentType: contentType || "application/octet-stream",
+          base64Content: uint8ToBase64(fileBuffer),
+        };
+      }
     }
 
     const latitude = latStr ? parseFloat(latStr) : null;
     const longitude = lngStr ? parseFloat(lngStr) : null;
 
     const { error } = await supabase.from("reports").insert({
-      reg_number: "ANON",
+      reg_number: regNumber,
       masked_reg: "***",
-      vehicle_type: vehicleType,
+      vehicle_type: vehicleType || "car",
       address,
       comment,
       latitude,
@@ -108,6 +196,20 @@ Deno.serve(async (req) => {
     });
 
     if (error) throw error;
+
+    const locationText =
+      latitude !== null && longitude !== null
+        ? `${latitude}, ${longitude}`
+        : address || "Ej angiven";
+
+    await sendNotificationEmail({
+      regNumber,
+      locationText,
+      timeOfReport: happenedAt || new Date().toISOString(),
+      vehicleType,
+      comment,
+      attachment: notificationAttachment,
+    });
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

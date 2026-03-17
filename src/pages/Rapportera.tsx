@@ -3,7 +3,7 @@ import { Camera, MapPin, Upload, CheckCircle, AlertCircle, Smartphone } from "lu
 
 type Status = "idle" | "uploading" | "success" | "error";
 
-const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
+const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%22+46729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A0%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod+SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");
@@ -75,7 +75,7 @@ export default function Rapportera() {
       if (file) formData.append("file", file);
 
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/submit-report`,
         { method: "POST", headers: { apikey: anonKey }, body: formData }
@@ -103,7 +103,7 @@ export default function Rapportera() {
           </h1>
           <p className="text-muted-foreground">Behandlas anonymt och konfidentiellt.</p>
           {isMobile && (
-            
+            <a
               href={SWISH_DEEP_LINK}
               className="inline-flex items-center gap-2 px-6 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground font-bold text-sm rounded-full transition-all"
             >
@@ -156,7 +156,7 @@ export default function Rapportera() {
                 locationStatus === "granted"
                   ? "border-green-500/30 bg-green-500/10 text-green-400"
                   : locationStatus === "denied"
-                  ? "border-destructive/30 bg-destructive/10 text-destructive"
+                  ? "border-zinc-500/30 bg-zinc-500/10 text-zinc-300"
                   : "border-border text-muted-foreground hover:border-foreground/30"
               }`}
             >
