@@ -3,7 +3,8 @@ import { Heart, Smartphone } from "lucide-react";
 const SWISH_NUMBER = "46729626225";
 const SWISH_DISPLAY = "+46 72-962 62 25";
 const SWISH_DEEP_LINK = `swish://payment?phone=${SWISH_NUMBER}&amount=&message=St%C3%B6d%20SNITCH`;
-const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(SWISH_DEEP_LINK)}&bgcolor=0a0a0a&color=ffffff&margin=8`;
+const SWISH_QR_PAYLOAD_URL = "https://app.swish.nu/1/p/sw/?sw=0729626225&msg=St%C3%B6d%20SNITCH&edit=msg";
+const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(SWISH_QR_PAYLOAD_URL)}&bgcolor=0a0a0a&color=ffffff&margin=8`;
 
 export default function DonationSection() {
   const isMobile = /iPhone|Android/i.test(navigator.userAgent);
@@ -24,7 +25,7 @@ export default function DonationSection() {
           </a>
         ) : (
           <div className="flex flex-col items-center gap-3">
-            <img src={QR_URL} alt="Swish QR" className="w-28 h-28 rounded-xl" />
+            <img src={QR_URL} alt="Swish QR" className="w-40 h-40 rounded-xl" />
             <p className="text-xs text-muted-foreground/50">{SWISH_DISPLAY}</p>
           </div>
         )}

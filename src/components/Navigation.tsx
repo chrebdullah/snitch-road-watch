@@ -7,9 +7,8 @@ const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3
 
 const navLinks = [
   { label: "Hur det funkar", href: "/#how-it-works" },
-  { label: "Statistik", href: "/#map" },
   { label: "Rapportera", href: "/rapportera" },
-  { label: "Visa rapporter", href: "/rapporter" },
+  { label: "Händelser/Rapporter", href: "/rapporter" },
   { label: "Integritet", href: "/integritet" },
   { label: "Om SNITCH", href: "/om" },
 ];
@@ -63,15 +62,13 @@ export default function Navigation() {
       <nav
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "bg-background/95 backdrop-blur-md border-b border-border" : "bg-transparent"}`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 group">
-            <span className="inline-flex items-center justify-center h-12 min-h-[44px] px-2 rounded-md bg-black/75 ring-1 ring-white/20 shadow-[0_0_14px_rgba(0,0,0,0.45)]">
-              <img
-                src={snitchLogo}
-                alt="SNITCH"
-                className="h-8 w-auto object-contain drop-shadow-[0_0_8px_rgba(255,255,255,0.35)] group-hover:scale-105 transition-transform"
-              />
-            </span>
+            <img
+              src={snitchLogo}
+              alt="SNITCH"
+              className="h-16 w-auto object-contain group-hover:scale-105 transition-transform"
+            />
             <span className="text-white text-[18px] leading-none font-extrabold tracking-wide">SNITCH</span>
           </Link>
 

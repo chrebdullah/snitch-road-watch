@@ -119,36 +119,42 @@ export type Database = {
         Row: {
           address: string | null
           city: string | null
+          comment: string | null
           created_at: string | null
           happened_on: string | null
           id: string | null
           latitude: number | null
           longitude: number | null
           masked_reg: string | null
+          media_url: string | null
           source: string | null
           vehicle_type: string | null
         }
         Insert: {
           address?: string | null
           city?: string | null
+          comment?: string | null
           created_at?: string | null
           happened_on?: string | null
           id?: string | null
           latitude?: number | null
           longitude?: number | null
           masked_reg?: string | null
+          media_url?: string | null
           source?: string | null
           vehicle_type?: string | null
         }
         Update: {
           address?: string | null
           city?: string | null
+          comment?: string | null
           created_at?: string | null
           happened_on?: string | null
           id?: string | null
           latitude?: number | null
           longitude?: number | null
           masked_reg?: string | null
+          media_url?: string | null
           source?: string | null
           vehicle_type?: string | null
         }

@@ -2,7 +2,8 @@ import snitchLogo from "@/assets/logosnitch.png";
 import { Smartphone } from "lucide-react";
 
 const SWISH_DEEP_LINK = `swish://payment?phone=46729626225&amount=&message=St%C3%B6d%20SNITCH`;
-const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(SWISH_DEEP_LINK)}&bgcolor=000000&color=ffffff&margin=12`;
+const SWISH_QR_PAYLOAD_URL = "https://app.swish.nu/1/p/sw/?sw=0729626225&msg=St%C3%B6d%20SNITCH&edit=msg";
+const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(SWISH_QR_PAYLOAD_URL)}&bgcolor=000000&color=ffffff&margin=12`;
 
 export default function Om() {
   const isMobile = /iPhone|Android/i.test(navigator.userAgent);
@@ -11,7 +12,7 @@ export default function Om() {
     <div className="min-h-screen pt-24 pb-16 px-4">
       <div className="max-w-2xl mx-auto animate-fade-in-up">
         <div className="mb-12 text-center">
-          <img src={snitchLogo} alt="SNITCH" className="w-16 h-16 mx-auto mb-6" />
+          <img src={snitchLogo} alt="SNITCH" className="w-52 h-52 sm:w-64 sm:h-64 mx-auto mb-8 object-contain" />
           <h1 className="text-4xl sm:text-5xl font-display font-black text-white">
             Om SNITCH
           </h1>
@@ -48,7 +49,7 @@ export default function Om() {
             ) : (
               <div className="flex flex-col items-start gap-3">
                 <div className="p-3 bg-black border border-white/10 rounded-xl">
-                  <img src={QR_URL} alt="Swish QR" className="w-36 h-36 rounded-lg" />
+                  <img src={QR_URL} alt="Swish QR" className="w-52 h-52 rounded-lg" />
                 </div>
                 <p className="text-xs text-white/30">Skanna med Swish i mobilen</p>
               </div>
