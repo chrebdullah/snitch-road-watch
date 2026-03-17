@@ -1,44 +1,33 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 @layer base {
   :root {
     --background: 0 0% 4%;
     --foreground: 0 0% 100%;
-
     --card: 0 0% 6%;
     --card-foreground: 0 0% 100%;
-
     --popover: 0 0% 8%;
     --popover-foreground: 0 0% 100%;
-
     --primary: 0 0% 100%;
     --primary-foreground: 0 0% 0%;
-
     --secondary: 0 0% 10%;
     --secondary-foreground: 0 0% 100%;
-
     --muted: 0 0% 12%;
     --muted-foreground: 0 0% 55%;
-
     --accent-brand: 54 100% 50%;
     --accent-brand-foreground: 0 0% 0%;
-
     --accent: 0 0% 15%;
     --accent-foreground: 0 0% 100%;
-
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-
     --border: 0 0% 15%;
     --input: 0 0% 12%;
     --ring: 0 0% 40%;
-
     --radius: 0.75rem;
-
     --sidebar-background: 0 0% 4%;
     --sidebar-foreground: 0 0% 90%;
     --sidebar-primary: 0 0% 100%;
@@ -47,8 +36,6 @@
     --sidebar-accent-foreground: 0 0% 90%;
     --sidebar-border: 0 0% 12%;
     --sidebar-ring: 0 0% 40%;
-
-    /* Custom SNITCH tokens */
     --snitch-red: 0 72% 51%;
     --snitch-gray: 0 0% 40%;
     --snitch-border: 0 0% 15%;
@@ -59,20 +46,16 @@
   * {
     @apply border-border;
   }
-
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-
   h1, h2, h3, h4, h5, h6 {
     font-family: 'Space Grotesk', sans-serif;
     font-weight: 700;
   }
-
-  /* Prevent iOS zoom on input focus */
   input, select, textarea {
     font-size: 16px !important;
   }
@@ -82,42 +65,33 @@
   .font-display {
     font-family: 'Space Grotesk', sans-serif;
   }
-
   .animate-fade-in {
     animation: fadeIn 0.8s ease-out forwards;
   }
-
   .animate-fade-in-up {
     animation: fadeInUp 0.8s ease-out forwards;
   }
-
   .animate-fade-in-delay-1 {
     animation: fadeIn 0.8s ease-out 0.2s both;
   }
-
   .animate-fade-in-delay-2 {
     animation: fadeIn 0.8s ease-out 0.4s both;
   }
-
   .animate-fade-in-delay-3 {
     animation: fadeIn 0.8s ease-out 0.6s both;
   }
-
   .animate-pulse-slow {
     animation: pulse 3s ease-in-out infinite;
   }
-
   .text-gradient {
     background: linear-gradient(135deg, #FFE600 0%, #fff 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
-
   .border-subtle {
     border-color: hsl(var(--snitch-border));
   }
-
   .bg-card-subtle {
     background: hsl(var(--card));
     border: 1px solid hsl(var(--border));
@@ -128,24 +102,20 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
-
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(24px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes fadeOut {
   from { opacity: 1; }
   to { opacity: 0; }
 }
 
-/* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: hsl(0 0% 4%); }
 ::-webkit-scrollbar-thumb { background: hsl(0 0% 20%); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(0 0% 30%); }
 
-/* PWA splash */
 .splash-overlay {
   position: fixed;
   inset: 0;
@@ -156,12 +126,10 @@
   justify-content: center;
   flex-direction: column;
 }
-
 .splash-fade-out {
   animation: fadeOut 0.3s ease-out forwards;
 }
 
-/* Leaflet overrides for dark theme */
 .leaflet-container {
   background: hsl(0 0% 4%) !important;
 }
