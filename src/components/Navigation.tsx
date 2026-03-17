@@ -27,18 +27,14 @@ export default function Navigation() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  useEffect(() => {
-    setOpen(false);
-  }, [location]);
+  useEffect(() => { setOpen(false); }, [location]);
 
   const handleAnchorClick = (href: string) => {
     if (href.startsWith("/#")) {
       const id = href.slice(2);
       if (location.pathname !== "/") {
         navigate("/");
-        setTimeout(() => {
-          document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-        }, 100);
+        setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }), 100);
         return;
       }
       document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
@@ -52,9 +48,7 @@ export default function Navigation() {
     } else {
       if (location.pathname !== "/") {
         navigate("/");
-        setTimeout(() => {
-      document.getElementById("donera")?.scrollIntoView({ behavior: "smooth" });
-        }, 100);
+        setTimeout(() => document.getElementById("donera")?.scrollIntoView({ behavior: "smooth" }), 100);
       } else {
         document.getElementById("donera")?.scrollIntoView({ behavior: "smooth" });
       }
@@ -64,98 +58,54 @@ export default function Navigation() {
 
   return (
     <>
-      <nav
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          scrolled ? "bg-black/95 backdrop-blur-md border-b border-white/5" : "bg-transparent"
-        }`}
-      >
+      <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "bg-background/95 backdrop-blur-md border-b border-border" : "bg-transparent"}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5 group">
-            <img
-              src={snitchLogo}
-              alt="SNITCH"
-              className="w-9 h-9 object-contain group-hover:scale-110 transition-transform"
-            />
-            <span className="font-display font-black text-xl tracking-tight text-white">
-              SNITCH
-            </span>
+            <img src={snitchLogo} alt="SNITCH" className="w-9 h-9 object-contain group-hover:scale-110 transition-transform" />
+            <span className="font-display font-black text-xl tracking-tight text-foreground">SNITCH</span>
           </Link>
 
-          {/* Desktop links */}
           <div className="hidden lg:flex items-center gap-7">
             {navLinks.map((link) =>
               link.href.startsWith("/#") ? (
-                <button
-                  key={link.label}
-                  onClick={() => handleAnchorClick(link.href)}
-                  className="text-sm text-white/60 hover:text-white transition-colors font-medium"
-                >
+                <button key={link.label} onClick={() => handleAnchorClick(link.href)} className="text-sm text-muted-foreground hover:text-foreground transition-colors font-medium">
                   {link.label}
                 </button>
               ) : (
-                <Link
-                  key={link.label}
-                  to={link.href}
-                  className={`text-sm font-medium transition-colors ${
-                    location.pathname === link.href
-                      ? "text-white"
-                      : "text-white/60 hover:text-white"
-                  }`}
-                >
+                <Link key={link.label} to={link.href} className={`text-sm font-medium transition-colors ${location.pathname === link.href ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                   {link.label}
                 </Link>
               )
             )}
           </div>
 
-          {/* Right actions */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleDonateClick}
-              className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 bg-white text-black text-sm font-semibold rounded-full hover:bg-white/90 transition-all"
-            >
+            <button onClick={handleDonateClick} className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 min-h-[48px] bg-accent-brand text-accent-brand-foreground text-sm font-semibold rounded-full hover:opacity-90 transition-all">
               {isMobile && <Smartphone size={13} />}
               Donera
             </button>
-            <button
-              className="lg:hidden text-white p-1"
-              onClick={() => setOpen(!open)}
-              aria-label="Toggle menu"
-            >
+            <button className="lg:hidden text-foreground p-1" onClick={() => setOpen(!open)} aria-label="Meny">
               {open ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
         </div>
       </nav>
 
-      {/* Mobile menu */}
       {open && (
-        <div className="fixed inset-0 z-40 bg-black/98 backdrop-blur-md lg:hidden animate-fade-in">
+        <div className="fixed inset-0 z-40 bg-background/98 backdrop-blur-md lg:hidden animate-fade-in">
           <div className="flex flex-col items-center justify-center h-full gap-8 px-6">
             {navLinks.map((link) =>
               link.href.startsWith("/#") ? (
-                <button
-                  key={link.label}
-                  onClick={() => handleAnchorClick(link.href)}
-                  className="text-2xl font-display font-bold text-white/80 hover:text-white transition-colors"
-                >
+                <button key={link.label} onClick={() => handleAnchorClick(link.href)} className="text-2xl font-display font-bold text-foreground/80 hover:text-foreground transition-colors">
                   {link.label}
                 </button>
               ) : (
-                <Link
-                  key={link.label}
-                  to={link.href}
-                  className="text-2xl font-display font-bold text-white/80 hover:text-white transition-colors"
-                >
+                <Link key={link.label} to={link.href} className="text-2xl font-display font-bold text-foreground/80 hover:text-foreground transition-colors">
                   {link.label}
                 </Link>
               )
             )}
-            <button
-              onClick={handleDonateClick}
-              className="mt-4 inline-flex items-center gap-2 px-8 py-3 bg-white text-black text-lg font-semibold rounded-full"
-            >
+            <button onClick={handleDonateClick} className="mt-4 inline-flex items-center gap-2 px-8 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground text-lg font-semibold rounded-full">
               {isMobile && <Smartphone size={18} />}
               Donera via Swish
             </button>
