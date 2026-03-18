@@ -1,13 +1,94 @@
 import { useState, useRef, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { Camera, MapPin, Upload, CheckCircle, Smartphone } from "lucide-react";
+import { Camera, MapPin, Upload, CheckCircle, Smartphone, AlertCircle, X } from "lucide-react";
 
 type Status = "idle" | "uploading" | "success" | "error";
+const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
+const STORAGE_BUCKET = (import.meta.env.VITE_REPORT_MEDIA_BUCKET ?? "report-media").trim() || "report-media";
 
 const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, SUPABASE_ANON_KEY);
+
+type UploadFailureKind = "bucket_missing" | "permission_denied" | "network" | "unknown";
+
+type SupabaseStorageErrorInfo = {
+  message: string;
+  statusCode: number | null;
+  errorCode: string | null;
+};
+
+function readSupabaseStorageError(error: unknown): SupabaseStorageErrorInfo {
+  if (!error || typeof error !== "object") {
+    return {
+      message: typeof error === "string" ? error : "Okänt upload-fel.",
+      statusCode: null,
+      errorCode: null,
+    };
+  }
+
+  const candidate = error as Record<string, unknown>;
+  const message = typeof candidate.message === "string" ? candidate.message : "Okänt upload-fel.";
+  const rawStatusCode = candidate.statusCode;
+  const statusCode =
+    typeof rawStatusCode === "number"
+      ? rawStatusCode
+      : typeof rawStatusCode === "string" && Number.isFinite(Number(rawStatusCode))
+      ? Number(rawStatusCode)
+      : null;
+  const errorCode =
+    typeof candidate.error === "string"
+      ? candidate.error
+      : typeof candidate.code === "string"
+      ? candidate.code
+      : null;
+
+  return { message, statusCode, errorCode };
+}
+
+function isNetworkError(message: string): boolean {
+  return /failed to fetch|fetch failed|network|load failed|networkerror/i.test(message);
+}
+
+function classifyUploadFailure(error: unknown): { kind: UploadFailureKind; userMessage: string; details: SupabaseStorageErrorInfo } {
+  const details = readSupabaseStorageError(error);
+  const lowered = details.message.toLowerCase();
+
+  if (details.statusCode === 404 || /bucket.+not found|does not exist|invalid bucket/i.test(details.message)) {
+    return {
+      kind: "bucket_missing",
+      userMessage: `Bilduppladdning är inte korrekt konfigurerad. Bucketen "${STORAGE_BUCKET}" saknas i Supabase Storage.`,
+      details,
+    };
+  }
+
+  if (
+    details.statusCode === 401 ||
+    details.statusCode === 403 ||
+    /not authorized|permission denied|row-level security|rls|access denied|unauthorized|forbidden/.test(lowered)
+  ) {
+    return {
+      kind: "permission_denied",
+      userMessage: "Bilduppladdning nekades av Supabase Storage (saknad behörighet/policy).",
+      details,
+    };
+  }
+
+  if (isNetworkError(details.message)) {
+    return {
+      kind: "network",
+      userMessage: "Nätverksfel vid bilduppladdning. Kontrollera anslutningen och försök igen.",
+      details,
+    };
+  }
+
+  return {
+    kind: "unknown",
+    userMessage: "Okänt fel vid bilduppladdning. Försök igen.",
+    details,
+  };
+}
 
 function maskRegNumber(regNumber: string): string {
   const clean = regNumber.replace(/\s+/g, "").toUpperCase();
@@ -63,6 +144,7 @@ export default function Rapportera() {
   const [comment, setComment] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState("");
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
@@ -73,7 +155,9 @@ export default function Rapportera() {
   const [honeypotValue, setHoneypotValue] = useState("");
   const cameraRef = useRef<HTMLInputElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const isMobile = /iPhone|Android/i.test(navigator.userAgent);
+  const userAgent = navigator.userAgent;
+  const isMobile = /iPhone|Android/i.test(userAgent);
+  const supportsDirectCameraCapture = /Android/i.test(userAgent);
 
   useEffect(() => {
     requestLocation();
@@ -100,22 +184,73 @@ export default function Rapportera() {
   };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (!f.type.startsWith("image/")) {
-      setErrorMsg("Endast bilder stöds.");
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+
+    if (!selected.type.startsWith("image/")) {
+      setErrorMsg("Ogiltig filtyp. Välj en bildfil.");
+      setFile(null);
+      setFilePreview(null);
+      setPreviewFailed(false);
+      e.target.value = "";
       return;
     }
-    if (f.size > 15 * 1024 * 1024) {
+
+    if (selected.size > MAX_IMAGE_SIZE_BYTES) {
       setErrorMsg("Bilden är för stor. Max 15MB.");
+      setFile(null);
+      setFilePreview(null);
+      setPreviewFailed(false);
+      e.target.value = "";
       return;
     }
+
+    try {
+      const nextPreview = URL.createObjectURL(selected);
+      if (filePreview) {
+        URL.revokeObjectURL(filePreview);
+      }
+      setFile(selected);
+      setFilePreview(nextPreview);
+      setPreviewFailed(false);
+      setErrorMsg("");
+    } catch (error) {
+      console.error("Kunde inte skapa bildförhandsvisning:", error);
+      setFile(null);
+      setFilePreview(null);
+      setPreviewFailed(false);
+      setErrorMsg("Kunde inte läsa bilden. Försök med en annan bild.");
+      e.target.value = "";
+    }
+  };
+
+  const clearSelectedFile = () => {
     if (filePreview) {
       URL.revokeObjectURL(filePreview);
     }
-    setFile(f);
-    setFilePreview(f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
-    setErrorMsg("");
+    setFile(null);
+    setFilePreview(null);
+    setPreviewFailed(false);
+    if (cameraRef.current) {
+      cameraRef.current.value = "";
+    }
+    if (uploadRef.current) {
+      uploadRef.current.value = "";
+    }
+  };
+
+  const openFilePicker = (targetRef: React.RefObject<HTMLInputElement>) => {
+    const input = targetRef.current;
+    if (!input) return;
+    try {
+      if ("showPicker" in input && typeof input.showPicker === "function") {
+        input.showPicker();
+        return;
+      }
+    } catch (error) {
+      console.error("showPicker misslyckades, fallback till click():", error);
+    }
+    input.click();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -150,13 +285,49 @@ export default function Rapportera() {
         const fileName = `${Date.now()}-${crypto.randomUUID()}.${safeExt}`;
         mediaPath = `uploads/${fileName}`;
 
-        const { error: uploadError } = await supabase.storage.from("report-media").upload(mediaPath, file, {
+        const bucketCheck = await supabase.storage.getBucket(STORAGE_BUCKET);
+        if (bucketCheck.error) {
+          const classifiedBucketError = classifyUploadFailure(bucketCheck.error);
+          if (classifiedBucketError.kind === "bucket_missing" || classifiedBucketError.kind === "network") {
+            console.error("Supabase storage bucket check failed", {
+              supabaseErrorMessage: classifiedBucketError.details.message,
+              statusCode: classifiedBucketError.details.statusCode,
+              errorCode: classifiedBucketError.details.errorCode,
+              bucketName: STORAGE_BUCKET,
+              filePath: mediaPath,
+              fileSize: file.size,
+              mimeType: file.type,
+            });
+            throw new Error(classifiedBucketError.userMessage);
+          }
+          console.warn("Supabase storage bucket could not be verified before upload", {
+            supabaseErrorMessage: classifiedBucketError.details.message,
+            statusCode: classifiedBucketError.details.statusCode,
+            errorCode: classifiedBucketError.details.errorCode,
+            bucketName: STORAGE_BUCKET,
+            filePath: mediaPath,
+            fileSize: file.size,
+            mimeType: file.type,
+          });
+        }
+
+        const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(mediaPath, file, {
           upsert: false,
           contentType: file.type,
         });
 
         if (uploadError) {
-          throw new Error("Kunde inte ladda upp bilden. Försök igen med en mindre bild.");
+          const classified = classifyUploadFailure(uploadError);
+          console.error("Supabase storage upload failed", {
+            supabaseErrorMessage: classified.details.message,
+            statusCode: classified.details.statusCode,
+            errorCode: classified.details.errorCode,
+            bucketName: STORAGE_BUCKET,
+            filePath: mediaPath,
+            fileSize: file.size,
+            mimeType: file.type,
+          });
+          throw new Error(classified.userMessage);
         }
       }
 
@@ -364,17 +535,42 @@ export default function Rapportera() {
           </div>
 
           <div className="relative border-2 border-dashed border-border rounded-2xl p-6 text-center transition-colors">
-            <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
+            <input ref={cameraRef} type="file" accept="image/*" capture={supportsDirectCameraCapture ? "environment" : undefined} className="hidden" onChange={handleFile} />
             <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-            {filePreview ? (
+            {file && filePreview && !previewFailed ? (
               <div className="space-y-3">
-                <img src={filePreview} alt="Preview" className="max-h-36 mx-auto rounded-xl object-cover" />
+                <img
+                  src={filePreview}
+                  alt="Preview"
+                  className="max-h-36 mx-auto rounded-xl object-cover"
+                  onError={() => {
+                    console.error("Bild-preview kunde inte renderas.");
+                    setPreviewFailed(true);
+                    setErrorMsg("Kunde inte visa bilden. Ta bort den och välj en ny.");
+                  }}
+                />
                 <p className="text-xs text-muted-foreground">{file?.name}</p>
+                <button
+                  type="button"
+                  onClick={clearSelectedFile}
+                  className="mx-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X size={12} />
+                  Ta bort bild
+                </button>
               </div>
             ) : file ? (
               <div className="space-y-1">
                 <Upload size={24} className="mx-auto text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">{file.name}</p>
+                <button
+                  type="button"
+                  onClick={clearSelectedFile}
+                  className="mx-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X size={12} />
+                  Ta bort bild
+                </button>
               </div>
             ) : (
               <div className="space-y-2">
@@ -386,14 +582,14 @@ export default function Rapportera() {
             <div className="mt-4 flex gap-3">
               <button
                 type="button"
-                onClick={() => cameraRef.current?.click()}
+                onClick={() => openFilePicker(cameraRef)}
                 className="flex-1 px-4 py-3 min-h-[48px] rounded-xl bg-secondary border border-border text-sm font-medium text-foreground"
               >
                 Ta foto
               </button>
               <button
                 type="button"
-                onClick={() => uploadRef.current?.click()}
+                onClick={() => openFilePicker(uploadRef)}
                 className="flex-1 px-4 py-3 min-h-[48px] rounded-xl border border-border text-sm font-medium text-muted-foreground"
               >
                 Ladda upp bild
