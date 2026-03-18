@@ -6,10 +6,8 @@ type Status = "idle" | "uploading" | "success" | "error";
 
 const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function maskRegNumber(regNumber: string): string {
   const clean = regNumber.replace(/\s+/g, "").toUpperCase();
@@ -30,13 +28,23 @@ export default function Rapportera() {
   const [happenedAt, setHappenedAt] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [infoMsg, setInfoMsg] = useState("");
   const [honeypotValue, setHoneypotValue] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
   const isMobile = /iPhone|Android/i.test(navigator.userAgent);
 
   useEffect(() => {
     requestLocation();
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (filePreview) {
+        URL.revokeObjectURL(filePreview);
+      }
+    };
+  }, [filePreview]);
 
   const requestLocation = () => {
     setLocationStatus("loading");
@@ -53,9 +61,20 @@ export default function Rapportera() {
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 50 * 1024 * 1024) { setErrorMsg("Max 50MB."); return; }
+    if (!f.type.startsWith("image/")) {
+      setErrorMsg("Endast bilder stöds.");
+      return;
+    }
+    if (f.size > 15 * 1024 * 1024) {
+      setErrorMsg("Bilden är för stor. Max 15MB.");
+      return;
+    }
+    if (filePreview) {
+      URL.revokeObjectURL(filePreview);
+    }
     setFile(f);
     setFilePreview(f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
+    setErrorMsg("");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -73,6 +92,7 @@ export default function Rapportera() {
 
     setStatus("uploading");
     setErrorMsg("");
+    setInfoMsg("");
 
     try {
       if (honeypotValue.trim()) {
@@ -81,24 +101,52 @@ export default function Rapportera() {
       }
 
       const cleanedReg = regNumber.trim().toUpperCase();
-      const report = {
-        reg_number: cleanedReg,
-        masked_reg: maskRegNumber(cleanedReg),
-        latitude: location?.lat ?? null,
-        longitude: location?.lng ?? null,
-        address: address.trim() || null,
-        comment: comment.trim() || null,
-        happened_on: !happenedNow && happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
-        approved: true,
-      };
+      let mediaPath: string | null = null;
 
-      const { error } = await supabase.from("reports").insert(report);
-      if (error) throw error;
+      if (file) {
+        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        const safeExt = ext.replace(/[^a-z0-9]/g, "") || "jpg";
+        const fileName = `${Date.now()}-${crypto.randomUUID()}.${safeExt}`;
+        mediaPath = `uploads/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage.from("report-media").upload(mediaPath, file, {
+          upsert: false,
+          contentType: file.type,
+        });
+
+        if (uploadError) {
+          throw new Error("Kunde inte ladda upp bilden. Försök igen med en mindre bild.");
+        }
+      }
+
+      const response = await fetch("/.netlify/functions/submit-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reg_number: cleanedReg,
+          latitude: location?.lat ?? null,
+          longitude: location?.lng ?? null,
+          address: address.trim() || null,
+          comment: comment.trim() || null,
+          happened_at: !happenedNow && happenedAt ? new Date(happenedAt).toISOString() : null,
+          media_path: mediaPath,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = typeof payload?.error === "string" ? payload.error : "Något gick fel vid inskick.";
+        throw new Error(message);
+      }
+
+      if (payload?.email_sent === false) {
+        setInfoMsg("Rapporten sparades, men e-postnotisen kunde inte skickas just nu.");
+      }
 
       setStatus("success");
-    } catch {
+    } catch (error) {
       setStatus("error");
-      setErrorMsg("Något gick fel.");
+      setErrorMsg(error instanceof Error ? error.message : "Något gick fel.");
     }
   };
 
@@ -116,8 +164,28 @@ export default function Rapportera() {
               <Smartphone size={15} /> Stöd via Swish
             </a>
           )}
+          {infoMsg && (
+            <div className="flex items-center justify-center gap-2 p-3 rounded-xl bg-accent-brand/10 border border-accent-brand/40 text-xs text-accent-brand-foreground">
+              <AlertCircle size={14} />
+              {infoMsg}
+            </div>
+          )}
           <button
-            onClick={() => { setStatus("idle"); setFile(null); setFilePreview(null); setComment(""); setRegNumber(""); setHappenedNow(true); }}
+            onClick={() => {
+              if (filePreview) {
+                URL.revokeObjectURL(filePreview);
+              }
+              setStatus("idle");
+              setFile(null);
+              setFilePreview(null);
+              setComment("");
+              setRegNumber("");
+              setHappenedNow(true);
+              setHappenedAt("");
+              setAddress("");
+              setErrorMsg("");
+              setInfoMsg("");
+            }}
             className="px-6 py-3 min-h-[48px] border border-border text-muted-foreground text-sm font-medium rounded-full hover:border-foreground/30 hover:text-foreground transition-all"
           >
             Skicka en ny rapport
@@ -198,10 +266,14 @@ export default function Rapportera() {
             )}
           </div>
 
-          <div className="relative border-2 border-dashed border-border rounded-2xl p-6 text-center cursor-pointer hover:border-foreground/20 transition-colors" onClick={() => fileRef.current?.click()}>
-            <input ref={fileRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleFile} />
+          <div className="relative border-2 border-dashed border-border rounded-2xl p-6 text-center transition-colors">
+            <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
+            <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
             {filePreview ? (
-              <img src={filePreview} alt="Preview" className="max-h-36 mx-auto rounded-xl object-cover" />
+              <div className="space-y-3">
+                <img src={filePreview} alt="Preview" className="max-h-36 mx-auto rounded-xl object-cover" />
+                <p className="text-xs text-muted-foreground">{file?.name}</p>
+              </div>
             ) : file ? (
               <div className="space-y-1">
                 <Upload size={24} className="mx-auto text-muted-foreground" />
@@ -210,10 +282,26 @@ export default function Rapportera() {
             ) : (
               <div className="space-y-2">
                 <Camera size={28} className="mx-auto text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">Foto/video (valfritt)</p>
+                <p className="text-sm text-muted-foreground">Bild (valfritt)</p>
                 <p className="text-xs text-muted-foreground/40">EXIF rensas automatiskt</p>
               </div>
             )}
+            <div className="mt-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => cameraRef.current?.click()}
+                className="flex-1 px-4 py-3 min-h-[48px] rounded-xl bg-secondary border border-border text-sm font-medium text-foreground"
+              >
+                Ta foto
+              </button>
+              <button
+                type="button"
+                onClick={() => uploadRef.current?.click()}
+                className="flex-1 px-4 py-3 min-h-[48px] rounded-xl border border-border text-sm font-medium text-muted-foreground"
+              >
+                Ladda upp bild
+              </button>
+            </div>
           </div>
 
           <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Kommentar (valfritt)" rows={2} className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors resize-none" />
