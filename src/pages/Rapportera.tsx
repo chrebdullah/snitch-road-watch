@@ -140,7 +140,9 @@ export default function Rapportera() {
       }
 
       if (payload?.email_sent === false) {
-        setInfoMsg("Rapporten sparades, men e-postnotisen kunde inte skickas just nu.");
+        const reportId = typeof payload?.id === "string" ? payload.id : "";
+        const suffix = reportId ? ` Referens: ${reportId}.` : "";
+        setInfoMsg(`Rapporten sparades, men e-postnotisen kunde inte skickas just nu.${suffix}`);
       }
 
       setStatus("success");
