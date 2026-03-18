@@ -28,6 +28,15 @@ export default function Om() {
               <p className="text-white/50 text-base leading-relaxed mt-4">
                 Swisha mig gärna en gåva om ni vill stötta mitt arbete i att stoppa farliga bilister.
               </p>
+              <p className="text-white/50 text-base leading-relaxed mt-4">
+                Kontakta Snitch:{" "}
+                <a
+                  href="mailto:snitchsweden@gmail.com"
+                  className="text-accent-brand hover:text-accent-brand/80 underline underline-offset-4 transition-colors"
+                >
+                  snitchsweden@gmail.com
+                </a>
+              </p>
             </div>
           </div>
 
