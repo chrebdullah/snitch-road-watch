@@ -133,9 +133,19 @@ export default function Rapportera() {
         }),
       });
 
-      const payload = await response.json().catch(() => ({}));
+      let payload: Record<string, unknown> = {};
+      const rawText = await response.text();
+      try {
+        payload = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        payload = {};
+      }
       if (!response.ok) {
-        const message = typeof payload?.error === "string" ? payload.error : "Något gick fel vid inskick.";
+        const fallback = rawText.trim().slice(0, 120);
+        const message =
+          typeof payload?.error === "string"
+            ? payload.error
+            : fallback || "Något gick fel vid inskick.";
         throw new Error(message);
       }
 
