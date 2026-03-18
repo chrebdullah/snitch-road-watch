@@ -43,17 +43,71 @@ const REQUIRED_NOTIFICATION_RECIPIENTS = [
   "christianremrod@gmail.com",
 ];
 
+function jsonResponse(statusCode, body) {
+  return {
+    statusCode,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
+async function insertReportWithSchemaFallback(supabase, baseRecord) {
+  const primaryRecord = {
+    reg_number: baseRecord.reg_number,
+    masked_reg: baseRecord.masked_reg,
+    latitude: baseRecord.latitude,
+    longitude: baseRecord.longitude,
+    address: baseRecord.address,
+    comment: baseRecord.comment,
+    happened_on: baseRecord.happened_on,
+    media_url: baseRecord.media_path,
+    approved: true,
+    source: "web",
+  };
+
+  const { data: primaryData, error: primaryError } = await supabase
+    .from("reports")
+    .insert(primaryRecord)
+    .select("id")
+    .single();
+
+  if (!primaryError) {
+    return { data: primaryData, error: null, schema: "modern" };
+  }
+
+  const fallbackRecord = {
+    reg_number: baseRecord.reg_number,
+    masked_reg: baseRecord.masked_reg,
+    lat: baseRecord.latitude,
+    lng: baseRecord.longitude,
+    address: baseRecord.address,
+    comment: baseRecord.comment,
+    happened_on: baseRecord.happened_on,
+    image_url: baseRecord.media_path,
+    approved: true,
+    source: "web",
+  };
+
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from("reports")
+    .insert(fallbackRecord)
+    .select("id")
+    .single();
+
+  if (!fallbackError) {
+    return { data: fallbackData, error: null, schema: "legacy" };
+  }
+
+  return { data: null, error: primaryError, schema: "failed" };
+}
+
 export const handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers: CORS_HEADERS, body: "" };
   }
 
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Method not allowed" }),
-    };
+    return jsonResponse(405, { error: "Method not allowed" });
   }
 
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
@@ -72,22 +126,14 @@ export const handler = async (event) => {
   }
 
   if (!supabaseUrl || !supabaseKey) {
-    return {
-      statusCode: 500,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Servern saknar Supabase-konfiguration." }),
-    };
+    return jsonResponse(500, { error: "Servern saknar Supabase-konfiguration." });
   }
 
   let payload;
   try {
     payload = JSON.parse(event.body || "{}");
   } catch {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Felaktig JSON i request." }),
-    };
+    return jsonResponse(400, { error: "Felaktig JSON i request." });
   }
 
   const regNumber = payload.reg_number?.trim().toUpperCase() ?? "";
@@ -98,19 +144,11 @@ export const handler = async (event) => {
   const mediaPath = payload.media_path?.trim() || null;
 
   if (!regNumber) {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Registreringsnummer saknas." }),
-    };
+    return jsonResponse(400, { error: "Registreringsnummer saknas." });
   }
 
   if ((latitude === null || longitude === null) && !address) {
-    return {
-      statusCode: 400,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Plats saknas. Tillåt GPS eller skriv adress." }),
-    };
+    return jsonResponse(400, { error: "Plats saknas. Tillåt GPS eller skriv adress." });
   }
 
   const happenedOn = toDateOnlyIso(payload.happened_at);
@@ -119,37 +157,34 @@ export const handler = async (event) => {
   });
 
   try {
-    const { data: insertedReport, error: insertError } = await supabase
-      .from("reports")
-      .insert({
-        reg_number: regNumber,
-        masked_reg: maskRegNumber(regNumber),
-        latitude,
-        longitude,
-        address,
-        comment,
-        happened_on: happenedOn,
-        media_url: mediaPath,
-        approved: true,
-        source: "web",
-      })
-      .select("id")
-      .single();
+    const { data: insertedReport, error: insertError, schema: insertSchema } = await insertReportWithSchemaFallback(supabase, {
+      reg_number: regNumber,
+      masked_reg: maskRegNumber(regNumber),
+      latitude,
+      longitude,
+      address,
+      comment,
+      happened_on: happenedOn,
+      media_path: mediaPath,
+    });
 
     if (insertError) {
-      return {
-        statusCode: 500,
-        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Kunde inte spara rapporten i databasen." }),
-      };
+      return jsonResponse(500, {
+        error: "Kunde inte spara rapporten i databasen.",
+        details: insertError.message?.slice(0, 220) || "Okänt databasfel",
+      });
     }
 
     let mediaSignedUrl = null;
     if (mediaPath) {
-      const { data: signedUrlData } = await supabase.storage
-        .from("report-media")
-        .createSignedUrl(mediaPath, 60 * 60 * 24 * 7);
-      mediaSignedUrl = signedUrlData?.signedUrl ?? null;
+      try {
+        const { data: signedUrlData } = await supabase.storage
+          .from("report-media")
+          .createSignedUrl(mediaPath, 60 * 60 * 24 * 7);
+        mediaSignedUrl = signedUrlData?.signedUrl ?? null;
+      } catch {
+        mediaSignedUrl = null;
+      }
     }
 
     const backupKey = `reports/${new Date().toISOString().slice(0, 10)}/${insertedReport.id}`;
@@ -192,31 +227,35 @@ export const handler = async (event) => {
       if (uniqueRecipients.length === 0) {
         emailError = "SNITCH_TO_EMAIL saknas i miljövariabler.";
       } else {
-        const emailResponse = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${resendApiKey}`,
-          },
-          body: JSON.stringify({
-            from: process.env.SNITCH_FROM_EMAIL || "onboarding@resend.dev",
-            to: uniqueRecipients,
-            subject: "Ny rapport inkommen - SNITCH",
-            html: `<h2>Ny rapport</h2>
-              <p><strong>Regnr:</strong> ${escapeHtml(regNumber)}</p>
-              <p><strong>Plats:</strong> ${escapeHtml(locationText)}</p>
-              <p><strong>Tid:</strong> ${escapeHtml(payload.happened_at || "just nu")}</p>
-              <p><strong>Kommentar:</strong> ${escapeHtml(comment || "-")}</p>
-              ${mediaSection}
-              <p><strong>Rapport-ID:</strong> ${escapeHtml(insertedReport?.id || "okand")}</p>`,
-          }),
-        });
+        try {
+          const emailResponse = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${resendApiKey}`,
+            },
+            body: JSON.stringify({
+              from: process.env.SNITCH_FROM_EMAIL || "onboarding@resend.dev",
+              to: uniqueRecipients,
+              subject: "Ny rapport inkommen - SNITCH",
+              html: `<h2>Ny rapport</h2>
+                <p><strong>Regnr:</strong> ${escapeHtml(regNumber)}</p>
+                <p><strong>Plats:</strong> ${escapeHtml(locationText)}</p>
+                <p><strong>Tid:</strong> ${escapeHtml(payload.happened_at || "just nu")}</p>
+                <p><strong>Kommentar:</strong> ${escapeHtml(comment || "-")}</p>
+                ${mediaSection}
+                <p><strong>Rapport-ID:</strong> ${escapeHtml(insertedReport?.id || "okand")}</p>`,
+            }),
+          });
 
-        if (emailResponse.ok) {
-          emailSent = true;
-        } else {
-          const raw = await emailResponse.text();
-          emailError = `Email misslyckades: ${raw.slice(0, 300)}`;
+          if (emailResponse.ok) {
+            emailSent = true;
+          } else {
+            const raw = await emailResponse.text();
+            emailError = `Email misslyckades: ${raw.slice(0, 300)}`;
+          }
+        } catch (error) {
+          emailError = error instanceof Error ? `Email misslyckades: ${error.message.slice(0, 220)}` : "Email misslyckades.";
         }
       }
     } else {
@@ -236,24 +275,20 @@ export const handler = async (event) => {
       }
     }
 
-    return {
-      statusCode: 200,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ok: true,
-        id: insertedReport?.id ?? null,
-        backup_saved: backupSaved,
-        backup_key: backupSaved ? backupKey : null,
-        backup_error: backupError,
-        email_sent: emailSent,
-        email_error: emailError,
-      }),
-    };
-  } catch {
-    return {
-      statusCode: 500,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Något gick fel i servern vid rapportering." }),
-    };
+    return jsonResponse(200, {
+      ok: true,
+      id: insertedReport?.id ?? null,
+      schema: insertSchema,
+      backup_saved: backupSaved,
+      backup_key: backupSaved ? backupKey : null,
+      backup_error: backupError,
+      email_sent: emailSent,
+      email_error: emailError,
+    });
+  } catch (error) {
+    return jsonResponse(500, {
+      error: "Något gick fel i servern vid rapportering.",
+      details: error instanceof Error ? error.message.slice(0, 220) : "Okänt serverfel",
+    });
   }
 };
