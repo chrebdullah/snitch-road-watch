@@ -38,6 +38,11 @@ function parseEmailList(value) {
     .filter(Boolean);
 }
 
+function isValidEmail(value) {
+  if (!value) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 const REQUIRED_NOTIFICATION_RECIPIENTS = [
   "snitchsweden@gmail.com",
   "christianremrod@gmail.com",
@@ -55,6 +60,24 @@ function extractMissingColumn(error) {
   const message = error?.message || "";
   const match = message.match(/Could not find the '([^']+)' column/i);
   return match?.[1] ?? null;
+}
+
+async function sendResendEmail({ apiKey, from, to, subject, html }) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ from, to, subject, html }),
+  });
+
+  if (response.ok) {
+    return { ok: true, error: null };
+  }
+
+  const raw = await response.text();
+  return { ok: false, error: raw.slice(0, 300) };
 }
 
 async function insertAdaptiveRecord(supabase, record) {
@@ -250,7 +273,7 @@ export const handler = async (event) => {
         ...parseEmailList(process.env.SNITCH_TO_EMAIL || "snitchsweden@gmail.com"),
         ...parseEmailList(process.env.SNITCH_TO_EMAIL_FALLBACK),
       ];
-      const uniqueRecipients = [...new Set(recipients)];
+      const uniqueRecipients = [...new Set(recipients.map((entry) => entry.toLowerCase()))].filter(isValidEmail);
       const mediaSection = mediaSignedUrl
         ? `<p><strong>Bild:</strong> <a href="${escapeHtml(mediaSignedUrl)}">Öppna bilaga</a></p>`
         : "<p><strong>Bild:</strong> Ingen</p>";
@@ -258,31 +281,61 @@ export const handler = async (event) => {
         emailError = "SNITCH_TO_EMAIL saknas i miljövariabler.";
       } else {
         try {
-          const emailResponse = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${resendApiKey}`,
-            },
-            body: JSON.stringify({
-              from: process.env.SNITCH_FROM_EMAIL || "onboarding@resend.dev",
-              to: uniqueRecipients,
-              subject: "Ny rapport inkommen - SNITCH",
-              html: `<h2>Ny rapport</h2>
+          const from = process.env.SNITCH_FROM_EMAIL || "onboarding@resend.dev";
+          const subject = "Ny rapport inkommen - SNITCH";
+          const html = `<h2>Ny rapport</h2>
                 <p><strong>Regnr:</strong> ${escapeHtml(regNumber)}</p>
                 <p><strong>Plats:</strong> ${escapeHtml(locationText)}</p>
                 <p><strong>Tid:</strong> ${escapeHtml(payload.happened_at || "just nu")}</p>
                 <p><strong>Kommentar:</strong> ${escapeHtml(comment || "-")}</p>
                 ${mediaSection}
-                <p><strong>Rapport-ID:</strong> ${escapeHtml(insertedReport?.id || "okand")}</p>`,
-            }),
+                <p><strong>Rapport-ID:</strong> ${escapeHtml(insertedReport?.id || "okand")}</p>`;
+
+          const batchResult = await sendResendEmail({
+            apiKey: resendApiKey,
+            from,
+            to: uniqueRecipients,
+            subject,
+            html,
           });
 
-          if (emailResponse.ok) {
+          if (batchResult.ok) {
             emailSent = true;
           } else {
-            const raw = await emailResponse.text();
-            emailError = `Email misslyckades: ${raw.slice(0, 300)}`;
+            const successfulRecipients = [];
+            const failedRecipients = [];
+
+            for (const recipient of uniqueRecipients) {
+              const singleResult = await sendResendEmail({
+                apiKey: resendApiKey,
+                from,
+                to: [recipient],
+                subject,
+                html,
+              });
+              if (singleResult.ok) {
+                successfulRecipients.push(recipient);
+              } else {
+                failedRecipients.push({
+                  recipient,
+                  error: singleResult.error || "Okänt e-postfel",
+                });
+              }
+            }
+
+            emailSent = successfulRecipients.includes("snitchsweden@gmail.com");
+
+            if (emailSent && failedRecipients.length > 0) {
+              emailError = `Vissa mottagare misslyckades: ${failedRecipients
+                .map(({ recipient, error }) => `${recipient}: ${error}`)
+                .join(" | ")
+                .slice(0, 300)}`;
+            } else if (!emailSent) {
+              emailError = `Email misslyckades: ${failedRecipients
+                .map(({ recipient, error }) => `${recipient}: ${error}`)
+                .join(" | ")
+                .slice(0, 300)}`;
+            }
           }
         } catch (error) {
           emailError = error instanceof Error ? `Email misslyckades: ${error.message.slice(0, 220)}` : "Email misslyckades.";
