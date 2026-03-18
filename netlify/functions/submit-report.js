@@ -38,6 +38,11 @@ function parseEmailList(value) {
     .filter(Boolean);
 }
 
+const REQUIRED_NOTIFICATION_RECIPIENTS = [
+  "snitchsweden@gmail.com",
+  "christianremrod@gmail.com",
+];
+
 export const handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers: CORS_HEADERS, body: "" };
@@ -168,6 +173,7 @@ export const handler = async (event) => {
 
     if (resendApiKey) {
       const recipients = [
+        ...REQUIRED_NOTIFICATION_RECIPIENTS,
         ...parseEmailList(process.env.SNITCH_TO_EMAIL || "snitchsweden@gmail.com"),
         ...parseEmailList(process.env.SNITCH_TO_EMAIL_FALLBACK),
       ];
