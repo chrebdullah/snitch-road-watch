@@ -1,9 +1,22 @@
 import { useState, useRef, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { Camera, MapPin, Upload, CheckCircle, AlertCircle, Smartphone } from "lucide-react";
 
 type Status = "idle" | "uploading" | "success" | "error";
 
 const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
+
+function maskRegNumber(regNumber: string): string {
+  const clean = regNumber.replace(/\s+/g, "").toUpperCase();
+  if (clean.length <= 3) return "***";
+  if (clean.length <= 5) return `${clean.slice(0, 1)}***${clean.slice(-1)}`;
+  return `${clean.slice(0, 2)}***${clean.slice(-2)}`;
+}
 
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");
@@ -62,34 +75,30 @@ export default function Rapportera() {
     setErrorMsg("");
 
     try {
-      const formData = new FormData();
-      formData.append("reg_number", regNumber.trim().toUpperCase());
-      formData.append("website", honeypotValue);
-      if (location) {
-        formData.append("latitude", String(location.lat));
-        formData.append("longitude", String(location.lng));
-      }
-      if (address.trim()) formData.append("address", address.trim());
-      if (comment.trim()) formData.append("comment", comment.trim());
-      if (!happenedNow && happenedAt) formData.append("happened_at", happenedAt);
-      if (file) formData.append("file", file);
-
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const res = await fetch(
-        `${supabaseUrl}/functions/v1/submit-report`,
-        { method: "POST", headers: { apikey: anonKey }, body: formData }
-      );
-      const json = await res.json();
-      if (!res.ok || json.error) {
-        setStatus("error");
-        setErrorMsg(json.error ?? "Något gick fel.");
-      } else {
+      if (honeypotValue.trim()) {
         setStatus("success");
+        return;
       }
+
+      const cleanedReg = regNumber.trim().toUpperCase();
+      const report = {
+        reg_number: cleanedReg,
+        masked_reg: maskRegNumber(cleanedReg),
+        latitude: location?.lat ?? null,
+        longitude: location?.lng ?? null,
+        address: address.trim() || null,
+        comment: comment.trim() || null,
+        happened_on: !happenedNow && happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
+        approved: true,
+      };
+
+      const { error } = await supabase.from("reports").insert(report);
+      if (error) throw error;
+
+      setStatus("success");
     } catch {
       setStatus("error");
-      setErrorMsg("Nätverksfel. Försök igen.");
+      setErrorMsg("Något gick fel.");
     }
   };
 
