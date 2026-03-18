@@ -63,7 +63,13 @@ export const handler = async (event) => {
     process.env.VITE_SUPABASE_ANON_KEY ??
     process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const resendApiKey = process.env.RESEND_API_KEY;
-  const backupStore = getStore("snitch-report-backups");
+  let backupStore = null;
+  try {
+    backupStore = getStore("snitch-report-backups");
+  } catch {
+    // Blobs kan vara otillgängligt i vissa miljöer; rapporten ska ändå kunna sparas.
+    backupStore = null;
+  }
 
   if (!supabaseUrl || !supabaseKey) {
     return {
@@ -148,27 +154,29 @@ export const handler = async (event) => {
 
     const backupKey = `reports/${new Date().toISOString().slice(0, 10)}/${insertedReport.id}`;
     let backupSaved = false;
-    let backupError = null;
+    let backupError = backupStore ? null : "Backup-lagring ej tillgänglig i denna miljö.";
     let emailSent = false;
     let emailError = null;
     const locationText = address || (latitude !== null && longitude !== null ? `${latitude}, ${longitude}` : "-");
 
-    try {
-      await backupStore.setJSON(backupKey, {
-        id: insertedReport?.id ?? null,
-        created_at: new Date().toISOString(),
-        reg_number: regNumber,
-        address,
-        latitude,
-        longitude,
-        location_text: locationText,
-        comment,
-        happened_at: payload.happened_at ?? null,
-        media_path: mediaPath,
-      });
-      backupSaved = true;
-    } catch (error) {
-      backupError = error instanceof Error ? error.message.slice(0, 300) : "Kunde inte spara backup.";
+    if (backupStore) {
+      try {
+        await backupStore.setJSON(backupKey, {
+          id: insertedReport?.id ?? null,
+          created_at: new Date().toISOString(),
+          reg_number: regNumber,
+          address,
+          latitude,
+          longitude,
+          location_text: locationText,
+          comment,
+          happened_at: payload.happened_at ?? null,
+          media_path: mediaPath,
+        });
+        backupSaved = true;
+      } catch (error) {
+        backupError = error instanceof Error ? error.message.slice(0, 300) : "Kunde inte spara backup.";
+      }
     }
 
     if (resendApiKey) {
@@ -215,7 +223,7 @@ export const handler = async (event) => {
       emailError = "RESEND_API_KEY saknas i miljövariabler.";
     }
 
-    if (!emailSent) {
+    if (!emailSent && backupStore) {
       try {
         await backupStore.setJSON(`${backupKey}/delivery`, {
           id: insertedReport?.id ?? null,
