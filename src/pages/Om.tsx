@@ -11,7 +11,7 @@ export default function Om() {
     <div className="min-h-screen pt-24 pb-16 px-4">
       <div className="max-w-2xl mx-auto animate-fade-in-up">
         <div className="mb-12 text-center">
-          <img src={snitchLogo} alt="SNITCH" className="w-96 h-96 mx-auto mb-6 object-contain" />
+          <img src={snitchLogo} alt="SNITCH" className="w-[48rem] h-[48rem] max-w-full max-h-[75vh] mx-auto mb-6 object-contain" />
           <h1 className="text-4xl sm:text-5xl font-display font-black text-white">
             Om SNITCH
           </h1>
