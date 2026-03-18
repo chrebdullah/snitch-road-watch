@@ -43,10 +43,14 @@ export const handler = async (event) => {
   }
 
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
-  const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.SUPABASE_ANON_KEY ??
+    process.env.VITE_SUPABASE_ANON_KEY ??
+    process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const resendApiKey = process.env.RESEND_API_KEY;
 
-  if (!supabaseUrl || !supabaseServiceRole) {
+  if (!supabaseUrl || !supabaseKey) {
     return {
       statusCode: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
@@ -89,7 +93,7 @@ export const handler = async (event) => {
   }
 
   const happenedOn = toDateOnlyIso(payload.happened_at);
-  const supabase = createClient(supabaseUrl, supabaseServiceRole, {
+  const supabase = createClient(supabaseUrl, supabaseKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
