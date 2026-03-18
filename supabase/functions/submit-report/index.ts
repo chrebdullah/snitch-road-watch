@@ -11,6 +11,7 @@ const RATE_LIMIT = 5;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const IP_SALT = "snitch-salt-2026";
 const RESEND_API_URL = "https://api.resend.com/emails";
+const RESEND_FROM = "onboarding@resend.dev";
 const RESEND_TO = "snitchsweden@gmail.com";
 
 async function hashIP(ip: string): Promise<string> {
@@ -42,6 +43,7 @@ function stripExifFromJpeg(buffer: Uint8Array): Uint8Array {
 
 async function sendNotificationEmail(payload: {
   reportId: string;
+  regNumber: string;
   createdAt: string;
   address: string | null;
   latitude: number | null;
@@ -50,7 +52,6 @@ async function sendNotificationEmail(payload: {
   vehicleType: string;
 }) {
   const resendApiKey = Deno.env.get("RESEND_API_KEY");
-  const resendFrom = Deno.env.get("RESEND_FROM_EMAIL") ?? "SNITCH <onboarding@resend.dev>";
   if (!resendApiKey) throw new Error("RESEND_API_KEY saknas");
 
   const locationText = payload.address?.trim()
@@ -60,12 +61,13 @@ async function sendNotificationEmail(payload: {
       : "Ej angiven";
 
   const html = `
-    <h2>Ny rapport i SNITCH</h2>
-    <p><strong>Rapport-ID:</strong> ${payload.reportId}</p>
+    <h2>Ny rapport inkommen - SNITCH</h2>
+    <p><strong>Regnummer:</strong> ${payload.regNumber}</p>
+    <p><strong>Adress:</strong> ${locationText}</p>
     <p><strong>Tid:</strong> ${payload.createdAt}</p>
-    <p><strong>Fordonstyp:</strong> ${payload.vehicleType}</p>
-    <p><strong>Plats:</strong> ${locationText}</p>
     <p><strong>Kommentar:</strong> ${payload.comment?.trim() || "Ingen kommentar"}</p>
+    <p><strong>Fordonstyp:</strong> ${payload.vehicleType}</p>
+    <p><strong>Rapport-ID:</strong> ${payload.reportId}</p>
   `;
 
   const response = await fetch(RESEND_API_URL, {
@@ -75,9 +77,9 @@ async function sendNotificationEmail(payload: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: resendFrom,
+      from: RESEND_FROM,
       to: [RESEND_TO],
-      subject: "Ny SNITCH-rapport mottagen",
+      subject: "🚨 Ny rapport inkommen – SNITCH",
       html,
     }),
   });
@@ -86,6 +88,9 @@ async function sendNotificationEmail(payload: {
     const responseText = await response.text();
     throw new Error(`Resend misslyckades (${response.status}): ${responseText}`);
   }
+
+  const responseJson = await response.json();
+  console.info("Resend email sent", { id: responseJson?.id ?? null, to: RESEND_TO });
 }
 
 Deno.serve(async (req) => {
@@ -119,6 +124,7 @@ Deno.serve(async (req) => {
     }
 
     // Parse fields
+    const regNumber = (formData.get("reg_number") as string)?.trim().toUpperCase() || "ANON";
     const vehicleType = (formData.get("vehicle_type") as string) || "car";
     const latStr = formData.get("latitude") as string;
     const lngStr = formData.get("longitude") as string;
@@ -165,6 +171,7 @@ Deno.serve(async (req) => {
 
     await sendNotificationEmail({
       reportId: insertedReport.id,
+      regNumber,
       createdAt: insertedReport.created_at,
       address: insertedReport.address,
       latitude: insertedReport.latitude,
