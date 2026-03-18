@@ -58,7 +58,16 @@ export const handler = async (event) => {
     for (const key of baseReportKeys) {
       const report = await store.get(key, { type: "json" });
       if (report) {
-        reports.push(report);
+        let delivery = null;
+        try {
+          delivery = await store.get(`${key}/delivery`, { type: "json" });
+        } catch {
+          delivery = null;
+        }
+        reports.push({
+          ...report,
+          delivery: delivery ?? null,
+        });
       }
     }
 
