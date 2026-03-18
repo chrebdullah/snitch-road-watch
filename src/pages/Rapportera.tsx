@@ -16,6 +16,13 @@ function maskRegNumber(regNumber: string): string {
   return `${clean.slice(0, 2)}***${clean.slice(-2)}`;
 }
 
+function toDateOnlyIso(value: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().split("T")[0] ?? null;
+}
+
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");
   const [comment, setComment] = useState("");
@@ -101,6 +108,7 @@ export default function Rapportera() {
       }
 
       const cleanedReg = regNumber.trim().toUpperCase();
+      const happenedOn = toDateOnlyIso(!happenedNow && happenedAt ? happenedAt : null);
       let mediaPath: string | null = null;
 
       if (file) {
@@ -119,34 +127,91 @@ export default function Rapportera() {
         }
       }
 
-      const response = await fetch("/.netlify/functions/submit-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reg_number: cleanedReg,
-          latitude: location?.lat ?? null,
-          longitude: location?.lng ?? null,
-          address: address.trim() || null,
-          comment: comment.trim() || null,
-          happened_at: !happenedNow && happenedAt ? new Date(happenedAt).toISOString() : null,
-          media_path: mediaPath,
-        }),
-      });
+      const requestPayload = {
+        reg_number: cleanedReg,
+        latitude: location?.lat ?? null,
+        longitude: location?.lng ?? null,
+        address: address.trim() || null,
+        comment: comment.trim() || null,
+        happened_at: !happenedNow && happenedAt ? new Date(happenedAt).toISOString() : null,
+        media_path: mediaPath,
+      };
+
+      const saveReportDirectly = async () => {
+        const modernInsert = await supabase
+          .from("reports")
+          .insert({
+            reg_number: cleanedReg,
+            masked_reg: maskRegNumber(cleanedReg),
+            latitude: location?.lat ?? null,
+            longitude: location?.lng ?? null,
+            address: address.trim() || null,
+            comment: comment.trim() || null,
+            happened_on: happenedOn,
+            media_url: mediaPath,
+            approved: true,
+            source: "web",
+          })
+          .select("id")
+          .single();
+
+        if (!modernInsert.error) {
+          return modernInsert.data?.id ?? null;
+        }
+
+        const legacyInsert = await supabase
+          .from("reports")
+          .insert({
+            reg_number: cleanedReg,
+            masked_reg: maskRegNumber(cleanedReg),
+            lat: location?.lat ?? null,
+            lng: location?.lng ?? null,
+            address: address.trim() || null,
+            comment: comment.trim() || null,
+            happened_on: happenedOn,
+            image_url: mediaPath,
+            approved: true,
+            source: "web",
+          } as never)
+          .select("id")
+          .single();
+
+        if (legacyInsert.error) {
+          throw new Error("Kunde inte spara rapporten. Försök igen om en stund.");
+        }
+
+        return legacyInsert.data?.id ?? null;
+      };
 
       let payload: Record<string, unknown> = {};
-      const rawText = await response.text();
       try {
-        payload = rawText ? JSON.parse(rawText) : {};
-      } catch {
-        payload = {};
-      }
-      if (!response.ok) {
-        const fallback = rawText.trim().slice(0, 120);
-        const message =
-          typeof payload?.error === "string"
-            ? payload.error
-            : fallback || "Något gick fel vid inskick.";
-        throw new Error(message);
+        const response = await fetch("/.netlify/functions/submit-report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestPayload),
+        });
+
+        const rawText = await response.text();
+        try {
+          payload = rawText ? JSON.parse(rawText) : {};
+        } catch {
+          payload = {};
+        }
+        if (!response.ok) {
+          const fallback = rawText.trim().slice(0, 120);
+          const message =
+            typeof payload?.error === "string"
+              ? payload.error
+              : fallback || "Något gick fel vid inskick.";
+          throw new Error(message);
+        }
+      } catch (functionCallError) {
+        await saveReportDirectly();
+        const fallbackMessage =
+          functionCallError instanceof Error ? functionCallError.message : "Okänt fel i serverfunktionen.";
+        setInfoMsg(`Rapporten sparades i reservläge. Notiser kan vara fördröjda. (${fallbackMessage.slice(0, 100)})`);
+        setStatus("success");
+        return;
       }
 
       if (payload?.email_sent === false) {
