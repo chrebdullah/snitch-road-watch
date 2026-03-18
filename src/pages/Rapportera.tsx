@@ -4,11 +4,91 @@ import { Camera, MapPin, Upload, CheckCircle, Smartphone, AlertCircle, X } from 
 
 type Status = "idle" | "uploading" | "success" | "error";
 const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
+const STORAGE_BUCKET = (import.meta.env.VITE_REPORT_MEDIA_BUCKET ?? "report-media").trim() || "report-media";
 
 const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, SUPABASE_ANON_KEY);
+
+type UploadFailureKind = "bucket_missing" | "permission_denied" | "network" | "unknown";
+
+type SupabaseStorageErrorInfo = {
+  message: string;
+  statusCode: number | null;
+  errorCode: string | null;
+};
+
+function readSupabaseStorageError(error: unknown): SupabaseStorageErrorInfo {
+  if (!error || typeof error !== "object") {
+    return {
+      message: typeof error === "string" ? error : "Okänt upload-fel.",
+      statusCode: null,
+      errorCode: null,
+    };
+  }
+
+  const candidate = error as Record<string, unknown>;
+  const message = typeof candidate.message === "string" ? candidate.message : "Okänt upload-fel.";
+  const rawStatusCode = candidate.statusCode;
+  const statusCode =
+    typeof rawStatusCode === "number"
+      ? rawStatusCode
+      : typeof rawStatusCode === "string" && Number.isFinite(Number(rawStatusCode))
+      ? Number(rawStatusCode)
+      : null;
+  const errorCode =
+    typeof candidate.error === "string"
+      ? candidate.error
+      : typeof candidate.code === "string"
+      ? candidate.code
+      : null;
+
+  return { message, statusCode, errorCode };
+}
+
+function isNetworkError(message: string): boolean {
+  return /failed to fetch|fetch failed|network|load failed|networkerror/i.test(message);
+}
+
+function classifyUploadFailure(error: unknown): { kind: UploadFailureKind; userMessage: string; details: SupabaseStorageErrorInfo } {
+  const details = readSupabaseStorageError(error);
+  const lowered = details.message.toLowerCase();
+
+  if (details.statusCode === 404 || /bucket.+not found|does not exist|invalid bucket/i.test(details.message)) {
+    return {
+      kind: "bucket_missing",
+      userMessage: `Bilduppladdning är inte korrekt konfigurerad. Bucketen "${STORAGE_BUCKET}" saknas i Supabase Storage.`,
+      details,
+    };
+  }
+
+  if (
+    details.statusCode === 401 ||
+    details.statusCode === 403 ||
+    /not authorized|permission denied|row-level security|rls|access denied|unauthorized|forbidden/.test(lowered)
+  ) {
+    return {
+      kind: "permission_denied",
+      userMessage: "Bilduppladdning nekades av Supabase Storage (saknad behörighet/policy).",
+      details,
+    };
+  }
+
+  if (isNetworkError(details.message)) {
+    return {
+      kind: "network",
+      userMessage: "Nätverksfel vid bilduppladdning. Kontrollera anslutningen och försök igen.",
+      details,
+    };
+  }
+
+  return {
+    kind: "unknown",
+    userMessage: "Okänt fel vid bilduppladdning. Försök igen.",
+    details,
+  };
+}
 
 function maskRegNumber(regNumber: string): string {
   const clean = regNumber.replace(/\s+/g, "").toUpperCase();
@@ -205,14 +285,49 @@ export default function Rapportera() {
         const fileName = `${Date.now()}-${crypto.randomUUID()}.${safeExt}`;
         mediaPath = `uploads/${fileName}`;
 
-        const { error: uploadError } = await supabase.storage.from("report-media").upload(mediaPath, file, {
+        const bucketCheck = await supabase.storage.getBucket(STORAGE_BUCKET);
+        if (bucketCheck.error) {
+          const classifiedBucketError = classifyUploadFailure(bucketCheck.error);
+          if (classifiedBucketError.kind === "bucket_missing" || classifiedBucketError.kind === "network") {
+            console.error("Supabase storage bucket check failed", {
+              supabaseErrorMessage: classifiedBucketError.details.message,
+              statusCode: classifiedBucketError.details.statusCode,
+              errorCode: classifiedBucketError.details.errorCode,
+              bucketName: STORAGE_BUCKET,
+              filePath: mediaPath,
+              fileSize: file.size,
+              mimeType: file.type,
+            });
+            throw new Error(classifiedBucketError.userMessage);
+          }
+          console.warn("Supabase storage bucket could not be verified before upload", {
+            supabaseErrorMessage: classifiedBucketError.details.message,
+            statusCode: classifiedBucketError.details.statusCode,
+            errorCode: classifiedBucketError.details.errorCode,
+            bucketName: STORAGE_BUCKET,
+            filePath: mediaPath,
+            fileSize: file.size,
+            mimeType: file.type,
+          });
+        }
+
+        const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(mediaPath, file, {
           upsert: false,
           contentType: file.type,
         });
 
         if (uploadError) {
-          console.error("Bilduppladdning misslyckades:", uploadError);
-          throw new Error("Kunde inte ladda upp bilden. Försök igen med en mindre bild.");
+          const classified = classifyUploadFailure(uploadError);
+          console.error("Supabase storage upload failed", {
+            supabaseErrorMessage: classified.details.message,
+            statusCode: classified.details.statusCode,
+            errorCode: classified.details.errorCode,
+            bucketName: STORAGE_BUCKET,
+            filePath: mediaPath,
+            fileSize: file.size,
+            mimeType: file.type,
+          });
+          throw new Error(classified.userMessage);
         }
       }
 
