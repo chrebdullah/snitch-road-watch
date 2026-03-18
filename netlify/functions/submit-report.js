@@ -69,6 +69,7 @@ function resolveResendApiKey() {
 }
 
 const LAST_RESORT_NOTIFICATION_RECIPIENT = "snitchsweden@gmail.com";
+const REPORT_MEDIA_BUCKET = (readEnv("REPORT_MEDIA_BUCKET") ?? readEnv("VITE_REPORT_MEDIA_BUCKET") ?? "report-media").trim() || "report-media";
 
 function jsonResponse(statusCode, body) {
   return {
@@ -299,7 +300,20 @@ export const handler = async (event) => {
   const comment = payload.comment?.trim() || null;
   const latitude = typeof payload.latitude === "number" && Number.isFinite(payload.latitude) ? payload.latitude : null;
   const longitude = typeof payload.longitude === "number" && Number.isFinite(payload.longitude) ? payload.longitude : null;
-  const mediaPath = payload.media_path?.trim() || null;
+  const mediaFieldCandidates = [
+    { key: "media_path", value: payload.media_path },
+    { key: "image_path", value: payload.image_path },
+    { key: "image_url", value: payload.image_url },
+    { key: "media_url", value: payload.media_url },
+  ];
+  const matchedMediaField = mediaFieldCandidates.find(
+    (entry) => typeof entry.value === "string" && entry.value.trim().length > 0
+  );
+  const mediaPath = matchedMediaField ? matchedMediaField.value.trim() : null;
+  console.info(`[${requestId}] backend received image field`, {
+    media_field: matchedMediaField?.key ?? null,
+    media_path: mediaPath,
+  });
 
   if (!regNumber) {
     return jsonResponse(400, { error: "Registreringsnummer saknas." });
@@ -337,11 +351,20 @@ export const handler = async (event) => {
     if (mediaPath) {
       try {
         const { data: signedUrlData } = await supabase.storage
-          .from("report-media")
+          .from(REPORT_MEDIA_BUCKET)
           .createSignedUrl(mediaPath, 60 * 60 * 24 * 7);
         mediaSignedUrl = signedUrlData?.signedUrl ?? null;
+        console.info(`[${requestId}] Signed URL generation result`, {
+          bucket: REPORT_MEDIA_BUCKET,
+          media_path: mediaPath,
+          signed_url_created: Boolean(mediaSignedUrl),
+        });
       } catch {
         mediaSignedUrl = null;
+        console.warn(`[${requestId}] Signed URL generation threw`, {
+          bucket: REPORT_MEDIA_BUCKET,
+          media_path: mediaPath,
+        });
       }
     }
 
@@ -359,6 +382,9 @@ export const handler = async (event) => {
 
     if (backupStore) {
       try {
+        console.info(`[${requestId}] backup object image field`, {
+          media_path: mediaPath,
+        });
         await backupStore.setJSON(backupKey, {
           id: insertedReport?.id ?? null,
           created_at: new Date().toISOString(),
@@ -390,7 +416,14 @@ export const handler = async (event) => {
       });
       const mediaSection = mediaSignedUrl
         ? `<p><strong>Bild:</strong> <a href="${escapeHtml(mediaSignedUrl)}">Öppna bilaga</a></p>`
+        : mediaPath
+        ? `<p><strong>Bild:</strong> ${escapeHtml(mediaPath)}</p>`
         : "<p><strong>Bild:</strong> Ingen</p>";
+      console.info(`[${requestId}] email rendering of image field`, {
+        media_path: mediaPath,
+        media_signed_url: mediaSignedUrl,
+        rendered_value: mediaSignedUrl ? "signed_url" : mediaPath ? "storage_path" : "none",
+      });
       if (uniqueRecipients.length === 0) {
         emailError = "Inga giltiga email-mottagare konfigurerade.";
         console.error(`[${requestId}] Email sending skipped: recipient list empty`);

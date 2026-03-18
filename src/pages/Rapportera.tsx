@@ -145,6 +145,8 @@ export default function Rapportera() {
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
+  const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
+  const [isImageUploadInProgress, setIsImageUploadInProgress] = useState(false);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState("");
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
@@ -192,6 +194,7 @@ export default function Rapportera() {
       setFile(null);
       setFilePreview(null);
       setPreviewFailed(false);
+      setUploadedImagePath(null);
       e.target.value = "";
       return;
     }
@@ -201,6 +204,7 @@ export default function Rapportera() {
       setFile(null);
       setFilePreview(null);
       setPreviewFailed(false);
+      setUploadedImagePath(null);
       e.target.value = "";
       return;
     }
@@ -213,12 +217,14 @@ export default function Rapportera() {
       setFile(selected);
       setFilePreview(nextPreview);
       setPreviewFailed(false);
+      setUploadedImagePath(null);
       setErrorMsg("");
     } catch (error) {
       console.error("Kunde inte skapa bildförhandsvisning:", error);
       setFile(null);
       setFilePreview(null);
       setPreviewFailed(false);
+      setUploadedImagePath(null);
       setErrorMsg("Kunde inte läsa bilden. Försök med en annan bild.");
       e.target.value = "";
     }
@@ -231,6 +237,7 @@ export default function Rapportera() {
     setFile(null);
     setFilePreview(null);
     setPreviewFailed(false);
+    setUploadedImagePath(null);
     if (cameraRef.current) {
       cameraRef.current.value = "";
     }
@@ -266,6 +273,11 @@ export default function Rapportera() {
       return;
     }
 
+    if (isImageUploadInProgress) {
+      setErrorMsg("Bilduppladdning pågår fortfarande. Vänta tills den är klar.");
+      return;
+    }
+
     setStatus("uploading");
     setErrorMsg("");
 
@@ -277,19 +289,40 @@ export default function Rapportera() {
 
       const cleanedReg = regNumber.trim().toUpperCase();
       const happenedOn = toDateOnlyIso(!happenedNow && happenedAt ? happenedAt : null);
-      let mediaPath: string | null = null;
+      let mediaPath: string | null = uploadedImagePath;
 
-      if (file) {
+      if (file && !mediaPath) {
         const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
         const safeExt = ext.replace(/[^a-z0-9]/g, "") || "jpg";
         const fileName = `${Date.now()}-${crypto.randomUUID()}.${safeExt}`;
         mediaPath = `uploads/${fileName}`;
 
-        const bucketCheck = await supabase.storage.getBucket(STORAGE_BUCKET);
-        if (bucketCheck.error) {
-          const classifiedBucketError = classifyUploadFailure(bucketCheck.error);
-          if (classifiedBucketError.kind === "bucket_missing" || classifiedBucketError.kind === "network") {
-            console.error("Supabase storage bucket check failed", {
+        setIsImageUploadInProgress(true);
+        console.info("[Rapportera] upload start", {
+          bucket: STORAGE_BUCKET,
+          media_path: mediaPath,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type,
+        });
+
+        try {
+          const bucketCheck = await supabase.storage.getBucket(STORAGE_BUCKET);
+          if (bucketCheck.error) {
+            const classifiedBucketError = classifyUploadFailure(bucketCheck.error);
+            if (classifiedBucketError.kind === "bucket_missing" || classifiedBucketError.kind === "network") {
+              console.error("Supabase storage bucket check failed", {
+                supabaseErrorMessage: classifiedBucketError.details.message,
+                statusCode: classifiedBucketError.details.statusCode,
+                errorCode: classifiedBucketError.details.errorCode,
+                bucketName: STORAGE_BUCKET,
+                filePath: mediaPath,
+                fileSize: file.size,
+                mimeType: file.type,
+              });
+              throw new Error(classifiedBucketError.userMessage);
+            }
+            console.warn("Supabase storage bucket could not be verified before upload", {
               supabaseErrorMessage: classifiedBucketError.details.message,
               statusCode: classifiedBucketError.details.statusCode,
               errorCode: classifiedBucketError.details.errorCode,
@@ -298,36 +331,37 @@ export default function Rapportera() {
               fileSize: file.size,
               mimeType: file.type,
             });
-            throw new Error(classifiedBucketError.userMessage);
           }
-          console.warn("Supabase storage bucket could not be verified before upload", {
-            supabaseErrorMessage: classifiedBucketError.details.message,
-            statusCode: classifiedBucketError.details.statusCode,
-            errorCode: classifiedBucketError.details.errorCode,
-            bucketName: STORAGE_BUCKET,
-            filePath: mediaPath,
-            fileSize: file.size,
-            mimeType: file.type,
-          });
-        }
 
-        const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(mediaPath, file, {
-          upsert: false,
-          contentType: file.type,
-        });
-
-        if (uploadError) {
-          const classified = classifyUploadFailure(uploadError);
-          console.error("Supabase storage upload failed", {
-            supabaseErrorMessage: classified.details.message,
-            statusCode: classified.details.statusCode,
-            errorCode: classified.details.errorCode,
-            bucketName: STORAGE_BUCKET,
-            filePath: mediaPath,
-            fileSize: file.size,
-            mimeType: file.type,
+          const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(mediaPath, file, {
+            upsert: false,
+            contentType: file.type,
           });
-          throw new Error(classified.userMessage);
+
+          if (uploadError) {
+            const classified = classifyUploadFailure(uploadError);
+            console.error("Supabase storage upload failed", {
+              supabaseErrorMessage: classified.details.message,
+              statusCode: classified.details.statusCode,
+              errorCode: classified.details.errorCode,
+              bucketName: STORAGE_BUCKET,
+              filePath: mediaPath,
+              fileSize: file.size,
+              mimeType: file.type,
+            });
+            throw new Error(classified.userMessage);
+          }
+
+          console.info("[Rapportera] upload success", {
+            bucket: STORAGE_BUCKET,
+            media_path: mediaPath,
+          });
+          setUploadedImagePath(mediaPath);
+          console.info("[Rapportera] state updated with image path", {
+            uploaded_image_path: mediaPath,
+          });
+        } finally {
+          setIsImageUploadInProgress(false);
         }
       }
 
@@ -340,6 +374,9 @@ export default function Rapportera() {
         happened_at: !happenedNow && happenedAt ? new Date(happenedAt).toISOString() : null,
         media_path: mediaPath,
       };
+      console.info("[Rapportera] payload sent with image field", {
+        media_path: requestPayload.media_path,
+      });
 
       const saveReportDirectly = async () => {
         const attempts: Array<Record<string, unknown>> = [
@@ -447,6 +484,7 @@ export default function Rapportera() {
               setStatus("idle");
               setFile(null);
               setFilePreview(null);
+              setUploadedImagePath(null);
               setComment("");
               setRegNumber("");
               setHappenedNow(true);
@@ -605,7 +643,7 @@ export default function Rapportera() {
             </div>
           )}
 
-          <button type="submit" disabled={status === "uploading"} className="w-full py-4 min-h-[56px] bg-accent-brand text-accent-brand-foreground font-bold text-lg rounded-full hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50">
+          <button type="submit" disabled={status === "uploading" || isImageUploadInProgress} className="w-full py-4 min-h-[56px] bg-accent-brand text-accent-brand-foreground font-bold text-lg rounded-full hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50">
             {status === "uploading" ? "Skickar..." : "SKICKA RAPPORT"}
           </button>
 
