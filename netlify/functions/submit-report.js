@@ -51,8 +51,37 @@ function jsonResponse(statusCode, body) {
   };
 }
 
+function extractMissingColumn(error) {
+  const message = error?.message || "";
+  const match = message.match(/Could not find the '([^']+)' column/i);
+  return match?.[1] ?? null;
+}
+
+async function insertAdaptiveRecord(supabase, record) {
+  const candidate = { ...record };
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const { data, error } = await supabase.from("reports").insert(candidate).select("id").single();
+    if (!error) {
+      return { data, error: null, usedRecord: candidate };
+    }
+
+    lastError = error;
+    const missingColumn = extractMissingColumn(error);
+    if (missingColumn && Object.prototype.hasOwnProperty.call(candidate, missingColumn)) {
+      delete candidate[missingColumn];
+      continue;
+    }
+
+    break;
+  }
+
+  return { data: null, error: lastError, usedRecord: candidate };
+}
+
 async function insertReportWithSchemaFallback(supabase, baseRecord) {
-  const primaryRecord = {
+  const modernRecord = {
     reg_number: baseRecord.reg_number,
     masked_reg: baseRecord.masked_reg,
     latitude: baseRecord.latitude,
@@ -65,17 +94,7 @@ async function insertReportWithSchemaFallback(supabase, baseRecord) {
     source: "web",
   };
 
-  const { data: primaryData, error: primaryError } = await supabase
-    .from("reports")
-    .insert(primaryRecord)
-    .select("id")
-    .single();
-
-  if (!primaryError) {
-    return { data: primaryData, error: null, schema: "modern" };
-  }
-
-  const fallbackRecord = {
+  const legacyRecord = {
     reg_number: baseRecord.reg_number,
     masked_reg: baseRecord.masked_reg,
     lat: baseRecord.latitude,
@@ -88,17 +107,28 @@ async function insertReportWithSchemaFallback(supabase, baseRecord) {
     source: "web",
   };
 
-  const { data: fallbackData, error: fallbackError } = await supabase
-    .from("reports")
-    .insert(fallbackRecord)
-    .select("id")
-    .single();
+  const minimalRecord = {
+    reg_number: baseRecord.reg_number,
+    masked_reg: baseRecord.masked_reg,
+    approved: true,
+  };
 
-  if (!fallbackError) {
-    return { data: fallbackData, error: null, schema: "legacy" };
+  const attempts = [
+    { schema: "modern", record: modernRecord },
+    { schema: "legacy", record: legacyRecord },
+    { schema: "minimal", record: minimalRecord },
+  ];
+
+  let lastError = null;
+  for (const attempt of attempts) {
+    const { data, error, usedRecord } = await insertAdaptiveRecord(supabase, attempt.record);
+    if (!error) {
+      return { data, error: null, schema: attempt.schema, fields: Object.keys(usedRecord) };
+    }
+    lastError = error;
   }
 
-  return { data: null, error: primaryError, schema: "failed" };
+  return { data: null, error: lastError, schema: "failed", fields: [] };
 }
 
 export const handler = async (event) => {
@@ -157,7 +187,7 @@ export const handler = async (event) => {
   });
 
   try {
-    const { data: insertedReport, error: insertError, schema: insertSchema } = await insertReportWithSchemaFallback(supabase, {
+    const { data: insertedReport, error: insertError, schema: insertSchema, fields: insertFields } = await insertReportWithSchemaFallback(supabase, {
       reg_number: regNumber,
       masked_reg: maskRegNumber(regNumber),
       latitude,
@@ -279,6 +309,7 @@ export const handler = async (event) => {
       ok: true,
       id: insertedReport?.id ?? null,
       schema: insertSchema,
+      fields: insertFields,
       backup_saved: backupSaved,
       backup_key: backupSaved ? backupKey : null,
       backup_error: backupError,

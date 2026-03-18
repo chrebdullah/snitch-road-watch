@@ -23,6 +23,41 @@ function toDateOnlyIso(value: string | null): string | null {
   return date.toISOString().split("T")[0] ?? null;
 }
 
+function extractMissingColumn(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("message" in error)) return null;
+  const message = typeof error.message === "string" ? error.message : "";
+  const match = message.match(/Could not find the '([^']+)' column/i);
+  return match?.[1] ?? null;
+}
+
+async function insertAdaptiveReport(candidate: Record<string, unknown>) {
+  const record = { ...candidate };
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const result = await supabase
+      .from("reports")
+      .insert(record as never)
+      .select("id")
+      .single();
+
+    if (!result.error) {
+      return { id: result.data?.id ?? null, error: null };
+    }
+
+    lastError = result.error;
+    const missingColumn = extractMissingColumn(result.error);
+    if (missingColumn && Object.prototype.hasOwnProperty.call(record, missingColumn)) {
+      delete record[missingColumn];
+      continue;
+    }
+
+    break;
+  }
+
+  return { id: null, error: lastError };
+}
+
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");
   const [comment, setComment] = useState("");
@@ -138,9 +173,8 @@ export default function Rapportera() {
       };
 
       const saveReportDirectly = async () => {
-        const modernInsert = await supabase
-          .from("reports")
-          .insert({
+        const attempts: Array<Record<string, unknown>> = [
+          {
             reg_number: cleanedReg,
             masked_reg: maskRegNumber(cleanedReg),
             latitude: location?.lat ?? null,
@@ -151,17 +185,8 @@ export default function Rapportera() {
             media_url: mediaPath,
             approved: true,
             source: "web",
-          })
-          .select("id")
-          .single();
-
-        if (!modernInsert.error) {
-          return modernInsert.data?.id ?? null;
-        }
-
-        const legacyInsert = await supabase
-          .from("reports")
-          .insert({
+          },
+          {
             reg_number: cleanedReg,
             masked_reg: maskRegNumber(cleanedReg),
             lat: location?.lat ?? null,
@@ -172,15 +197,22 @@ export default function Rapportera() {
             image_url: mediaPath,
             approved: true,
             source: "web",
-          } as never)
-          .select("id")
-          .single();
+          },
+          {
+            reg_number: cleanedReg,
+            masked_reg: maskRegNumber(cleanedReg),
+            approved: true,
+          },
+        ];
 
-        if (legacyInsert.error) {
-          throw new Error("Kunde inte spara rapporten. Försök igen om en stund.");
+        for (const candidate of attempts) {
+          const { id, error } = await insertAdaptiveReport(candidate);
+          if (!error) {
+            return id;
+          }
         }
 
-        return legacyInsert.data?.id ?? null;
+        throw new Error("Kunde inte spara rapporten. Försök igen om en stund.");
       };
 
       let payload: Record<string, unknown> = {};
