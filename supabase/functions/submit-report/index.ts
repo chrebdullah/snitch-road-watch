@@ -10,6 +10,9 @@ const corsHeaders = {
 const RATE_LIMIT = 5;
 const RATE_WINDOW_MS = 60 * 60 * 1000;
 const IP_SALT = "snitch-salt-2026";
+const RESEND_API_URL = "https://api.resend.com/emails";
+const RESEND_FROM = "onboarding@resend.dev";
+const RESEND_TO = "snitchsweden@gmail.com";
 
 async function hashIP(ip: string): Promise<string> {
   const data = new TextEncoder().encode(IP_SALT + ip);
@@ -36,6 +39,58 @@ function stripExifFromJpeg(buffer: Uint8Array): Uint8Array {
     }
   }
   return new Uint8Array(result);
+}
+
+async function sendNotificationEmail(payload: {
+  reportId: string;
+  regNumber: string;
+  createdAt: string;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  comment: string | null;
+  vehicleType: string;
+}) {
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  if (!resendApiKey) throw new Error("RESEND_API_KEY saknas");
+
+  const locationText = payload.address?.trim()
+    ? payload.address
+    : payload.latitude !== null && payload.longitude !== null
+      ? `${payload.latitude}, ${payload.longitude}`
+      : "Ej angiven";
+
+  const html = `
+    <h2>Ny rapport inkommen - SNITCH</h2>
+    <p><strong>Regnummer:</strong> ${payload.regNumber}</p>
+    <p><strong>Adress:</strong> ${locationText}</p>
+    <p><strong>Tid:</strong> ${payload.createdAt}</p>
+    <p><strong>Kommentar:</strong> ${payload.comment?.trim() || "Ingen kommentar"}</p>
+    <p><strong>Fordonstyp:</strong> ${payload.vehicleType}</p>
+    <p><strong>Rapport-ID:</strong> ${payload.reportId}</p>
+  `;
+
+  const response = await fetch(RESEND_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM,
+      to: [RESEND_TO],
+      subject: "🚨 Ny rapport inkommen – SNITCH",
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    throw new Error(`Resend misslyckades (${response.status}): ${responseText}`);
+  }
+
+  const responseJson = await response.json();
+  console.info("Resend email sent", { id: responseJson?.id ?? null, to: RESEND_TO });
 }
 
 Deno.serve(async (req) => {
@@ -69,6 +124,7 @@ Deno.serve(async (req) => {
     }
 
     // Parse fields
+    const regNumber = (formData.get("reg_number") as string)?.trim().toUpperCase() || "ANON";
     const vehicleType = (formData.get("vehicle_type") as string) || "car";
     const latStr = formData.get("latitude") as string;
     const lngStr = formData.get("longitude") as string;
@@ -92,22 +148,37 @@ Deno.serve(async (req) => {
     const latitude = latStr ? parseFloat(latStr) : null;
     const longitude = lngStr ? parseFloat(lngStr) : null;
 
-    const { error } = await supabase.from("reports").insert({
-      reg_number: "ANON",
-      masked_reg: "***",
-      vehicle_type: vehicleType,
-      address,
-      comment,
-      latitude,
-      longitude,
-      city: null,
-      media_url: mediaUrl,
-      is_public: false,
-      approved: false,
-      happened_on: happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
-    });
+    const { data: insertedReport, error: insertError } = await supabase
+      .from("reports")
+      .insert({
+        reg_number: "ANON",
+        masked_reg: "***",
+        vehicle_type: vehicleType,
+        address,
+        comment,
+        latitude,
+        longitude,
+        city: null,
+        media_url: mediaUrl,
+        is_public: false,
+        approved: false,
+        happened_on: happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
+      })
+      .select("id, created_at, address, latitude, longitude, comment, vehicle_type")
+      .single();
 
-    if (error) throw error;
+    if (insertError || !insertedReport) throw insertError ?? new Error("Rapport kunde inte skapas");
+
+    await sendNotificationEmail({
+      reportId: insertedReport.id,
+      regNumber,
+      createdAt: insertedReport.created_at,
+      address: insertedReport.address,
+      latitude: insertedReport.latitude,
+      longitude: insertedReport.longitude,
+      comment: insertedReport.comment,
+      vehicleType: insertedReport.vehicle_type,
+    });
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

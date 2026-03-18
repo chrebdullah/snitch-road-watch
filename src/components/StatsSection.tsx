@@ -1,11 +1,29 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { BarChart3, Clock, MapPin } from "lucide-react";
+import { BarChart3, Clock, MapPin, ExternalLink } from "lucide-react";
+
+type Incident = {
+  id: string;
+  created_at: string;
+  masked_reg: string;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("sv-SE", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
 
 export default function StatsSection() {
   const [totalReports, setTotalReports] = useState(21);
   const [last24h, setLast24h] = useState(0);
   const [uniqueCities, setUniqueCities] = useState(0);
+  const [latestIncidents, setLatestIncidents] = useState<Incident[]>([]);
 
   const fetchStats = async () => {
     // Total
@@ -29,6 +47,14 @@ export default function StatsSection() {
       .not("city", "is", null);
     const cities = new Set((cityData || []).map((r: any) => r.city).filter(Boolean));
     setUniqueCities(cities.size);
+
+    // Latest incidents for clickable list under statistics
+    const { data: latestData } = await supabase
+      .from("reports_public")
+      .select("id, created_at, masked_reg, city, latitude, longitude")
+      .order("created_at", { ascending: false })
+      .limit(8);
+    setLatestIncidents((latestData as Incident[]) ?? []);
   };
 
   useEffect(() => {
@@ -50,6 +76,15 @@ export default function StatsSection() {
     { icon: MapPin, value: uniqueCities, label: "Orter representerade" },
   ];
 
+  const handleIncidentClick = (incident: Incident) => {
+    if (incident.latitude !== null && incident.longitude !== null) {
+      const coords = `${incident.latitude},${incident.longitude}`;
+      window.open(`https://www.google.com/maps?q=${coords}`, "_blank", "noopener,noreferrer");
+      return;
+    }
+    document.getElementById("map")?.scrollIntoView({ behavior: "smooth" });
+  };
+
   return (
     <section className="py-16 px-4">
       <div className="max-w-4xl mx-auto">
@@ -66,6 +101,32 @@ export default function StatsSection() {
               <div className="text-sm text-muted-foreground mt-1">{stat.label}</div>
             </div>
           ))}
+        </div>
+
+        <div className="mt-6 p-4 sm:p-5 rounded-2xl border border-border bg-card">
+          <h3 className="text-sm font-semibold text-foreground mb-3">Senaste incidenter</h3>
+          <div className="space-y-2">
+            {latestIncidents.length === 0 && (
+              <p className="text-xs text-muted-foreground">Inga incidenter att visa ännu.</p>
+            )}
+            {latestIncidents.map((incident) => (
+              <button
+                key={incident.id}
+                onClick={() => handleIncidentClick(incident)}
+                className="w-full flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-3 text-left hover:border-foreground/25 transition-colors"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-mono font-bold tracking-wider text-foreground truncate">
+                    {incident.masked_reg || "***"}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {incident.city || "Okänd ort"} · {formatDate(incident.created_at)}
+                  </p>
+                </div>
+                <ExternalLink size={14} className="text-muted-foreground shrink-0" />
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </section>
