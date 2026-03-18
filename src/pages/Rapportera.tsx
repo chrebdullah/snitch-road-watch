@@ -74,10 +74,10 @@ export default function Rapportera() {
       if (!happenedNow && happenedAt) formData.append("happened_at", happenedAt);
       if (file) formData.append("file", file);
 
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       const res = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/submit-report`,
+        `${supabaseUrl}/functions/v1/submit-report`,
         { method: "POST", headers: { apikey: anonKey }, body: formData }
       );
       const json = await res.json();

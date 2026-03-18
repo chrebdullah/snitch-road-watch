@@ -1,188 +1,130 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { crypto } from "https://deno.land/std@0.177.0/crypto/mod.ts";
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY")!;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const RATE_LIMIT = 5;
-const RATE_WINDOW_MS = 60 * 60 * 1000;
-const IP_SALT = "snitch-salt-2026";
-const RESEND_API_URL = "https://api.resend.com/emails";
-const RESEND_FROM = "onboarding@resend.dev";
-const RESEND_TO = "snitchsweden@gmail.com";
-
-async function hashIP(ip: string): Promise<string> {
-  const data = new TextEncoder().encode(IP_SALT + ip);
-  const buf = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+function toNumber(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
-function stripExifFromJpeg(buffer: Uint8Array): Uint8Array {
-  if (buffer[0] !== 0xff || buffer[1] !== 0xd8) return buffer;
-  const result: number[] = [0xff, 0xd8];
-  let i = 2;
-  while (i < buffer.length) {
-    if (buffer[i] !== 0xff) break;
-    const marker = buffer[i + 1];
-    if (marker >= 0xe0 && marker <= 0xef) {
-      const length = (buffer[i + 2] << 8) | buffer[i + 3];
-      if (marker === 0xe0) for (let j = i; j < i + 2 + length; j++) result.push(buffer[j]);
-      i += 2 + length;
-    } else {
-      if (marker === 0xda) { for (let j = i; j < buffer.length; j++) result.push(buffer[j]); break; }
-      const length = (buffer[i + 2] << 8) | buffer[i + 3];
-      for (let j = i; j < i + 2 + length; j++) result.push(buffer[j]);
-      i += 2 + length;
-    }
-  }
-  return new Uint8Array(result);
+function toDateOnlyIso(value: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().split("T")[0] ?? null;
 }
 
-async function sendNotificationEmail(payload: {
-  reportId: string;
-  regNumber: string;
-  createdAt: string;
-  address: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  comment: string | null;
-  vehicleType: string;
-}) {
-  const resendApiKey = Deno.env.get("RESEND_API_KEY");
-  if (!resendApiKey) throw new Error("RESEND_API_KEY saknas");
-
-  const locationText = payload.address?.trim()
-    ? payload.address
-    : payload.latitude !== null && payload.longitude !== null
-      ? `${payload.latitude}, ${payload.longitude}`
-      : "Ej angiven";
-
-  const html = `
-    <h2>Ny rapport inkommen - SNITCH</h2>
-    <p><strong>Regnummer:</strong> ${payload.regNumber}</p>
-    <p><strong>Adress:</strong> ${locationText}</p>
-    <p><strong>Tid:</strong> ${payload.createdAt}</p>
-    <p><strong>Kommentar:</strong> ${payload.comment?.trim() || "Ingen kommentar"}</p>
-    <p><strong>Fordonstyp:</strong> ${payload.vehicleType}</p>
-    <p><strong>Rapport-ID:</strong> ${payload.reportId}</p>
-  `;
-
-  const response = await fetch(RESEND_API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${resendApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: RESEND_FROM,
-      to: [RESEND_TO],
-      subject: "🚨 Ny rapport inkommen – SNITCH",
-      html,
-    }),
-  });
-
-  if (!response.ok) {
-    const responseText = await response.text();
-    throw new Error(`Resend misslyckades (${response.status}): ${responseText}`);
-  }
-
-  const responseJson = await response.json();
-  console.info("Resend email sent", { id: responseJson?.id ?? null, to: RESEND_TO });
+function maskRegNumber(regNumber: string): string {
+  const clean = regNumber.replace(/\s+/g, "").toUpperCase();
+  if (clean.length <= 3) return "***";
+  if (clean.length <= 5) return `${clean.slice(0, 1)}***${clean.slice(-1)}`;
+  return `${clean.slice(0, 2)}***${clean.slice(-2)}`;
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
 
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   try {
     const formData = await req.formData();
 
-    // Honeypot
-    const honeypot = formData.get("website") as string;
-    if (honeypot?.trim()) return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const regNumber = formData.get("reg_number")?.toString().trim().toUpperCase() ?? "";
+    const latitudeRaw = formData.get("latitude")?.toString() ?? null;
+    const longitudeRaw = formData.get("longitude")?.toString() ?? null;
+    const address = formData.get("address")?.toString().trim() ?? "";
+    const comment = formData.get("comment")?.toString().trim() ?? "";
+    const happenedAtRaw = formData.get("happened_at")?.toString() ?? null;
 
-    // Rate limit
-    const clientIP = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
-    const ipHash = await hashIP(clientIP);
-    const now = new Date();
-
-    const { data: rateData } = await supabase
-      .from("rate_limit_ips").select("id, report_count").eq("ip_hash", ipHash).gte("expires_at", now.toISOString()).maybeSingle();
-
-    if (rateData) {
-      if (rateData.report_count >= RATE_LIMIT) {
-        return new Response(JSON.stringify({ error: "Max 5 rapporter per timme. Försök igen senare." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      await supabase.from("rate_limit_ips").update({ report_count: rateData.report_count + 1 }).eq("id", rateData.id);
-    } else {
-      await supabase.from("rate_limit_ips").delete().lt("expires_at", now.toISOString());
-      await supabase.from("rate_limit_ips").insert({ ip_hash: ipHash, report_count: 1, window_start: now.toISOString(), expires_at: new Date(now.getTime() + RATE_WINDOW_MS).toISOString() });
+    if (!regNumber) {
+      return new Response(JSON.stringify({ error: "reg_number saknas" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Parse fields
-    const regNumber = (formData.get("reg_number") as string)?.trim().toUpperCase() || "ANON";
-    const vehicleType = (formData.get("vehicle_type") as string) || "car";
-    const latStr = formData.get("latitude") as string;
-    const lngStr = formData.get("longitude") as string;
-    const address = (formData.get("address") as string) || null;
-    const comment = (formData.get("comment") as string) || null;
-    const happenedAt = formData.get("happened_at") as string;
-    const file = formData.get("file") as File | null;
+    const latitude = toNumber(latitudeRaw);
+    const longitude = toNumber(longitudeRaw);
+    const happenedOn = toDateOnlyIso(happenedAtRaw);
 
-    // File upload
-    let mediaUrl: string | null = null;
-    if (file && file.size > 0) {
-      let fileBuffer = new Uint8Array(await file.arrayBuffer());
-      const contentType = file.type;
-      if (contentType === "image/jpeg" || contentType === "image/jpg") fileBuffer = stripExifFromJpeg(fileBuffer);
-      const ext = file.name.split(".").pop() ?? "bin";
-      const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("report-media").upload(fileName, fileBuffer, { contentType });
-      if (!uploadError) mediaUrl = fileName;
-    }
-
-    const latitude = latStr ? parseFloat(latStr) : null;
-    const longitude = lngStr ? parseFloat(lngStr) : null;
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const { data: insertedReport, error: insertError } = await supabase
       .from("reports")
       .insert({
-        reg_number: "ANON",
-        masked_reg: "***",
-        vehicle_type: vehicleType,
-        address,
-        comment,
+        reg_number: regNumber,
+        masked_reg: maskRegNumber(regNumber),
         latitude,
         longitude,
-        city: null,
-        media_url: mediaUrl,
-        is_public: false,
-        approved: false,
-        happened_on: happenedAt ? new Date(happenedAt).toISOString().split("T")[0] : null,
+        address: address || null,
+        comment: comment || null,
+        happened_on: happenedOn,
+        approved: true,
       })
-      .select("id, created_at, address, latitude, longitude, comment, vehicle_type")
+      .select("id")
       .single();
 
-    if (insertError || !insertedReport) throw insertError ?? new Error("Rapport kunde inte skapas");
+    if (insertError) {
+      return new Response(JSON.stringify({ error: insertError.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    await sendNotificationEmail({
-      reportId: insertedReport.id,
-      regNumber,
-      createdAt: insertedReport.created_at,
-      address: insertedReport.address,
-      latitude: insertedReport.latitude,
-      longitude: insertedReport.longitude,
-      comment: insertedReport.comment,
-      vehicleType: insertedReport.vehicle_type,
+    const locationText = address || (latitude !== null && longitude !== null ? `${latitude}, ${longitude}` : "–");
+
+    const emailResponse = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: "onboarding@resend.dev",
+        to: "snitchsweden@gmail.com",
+        subject: "Ny rapport inkommen - SNITCH",
+        html: `<h2>Ny rapport</h2>
+          <p><strong>Regnr:</strong> ${regNumber}</p>
+          <p><strong>Plats:</strong> ${locationText}</p>
+          <p><strong>Tid:</strong> ${happenedAtRaw || "just nu"}</p>
+          <p><strong>Kommentar:</strong> ${comment || "-"}</p>
+          <p><strong>Rapport-ID:</strong> ${insertedReport?.id ?? "okand"}</p>`,
+      }),
     });
 
-    return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-  } catch (err) {
-    console.error("submit-report error:", err);
-    return new Response(JSON.stringify({ error: "Något gick fel. Försök igen." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!emailResponse.ok) {
+      const emailError = await emailResponse.text();
+      return new Response(JSON.stringify({ error: `Email misslyckades: ${emailError}` }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ ok: true, id: insertedReport?.id ?? null }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    console.error("submit-report error", error);
+    return new Response(JSON.stringify({ error: "Något gick fel" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
