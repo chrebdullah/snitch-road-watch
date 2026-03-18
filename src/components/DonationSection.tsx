@@ -1,9 +1,7 @@
 import { Heart, Smartphone } from "lucide-react";
 
-const SWISH_NUMBER = "46729626225";
-const SWISH_DISPLAY = "+46 72-962 62 25";
+const SWISH_NUMBER = "0729626225";
 const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
-const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(SWISH_DEEP_LINK)}&bgcolor=0a0a0a&color=ffffff&margin=8`;
 
 export default function DonationSection() {
   const isMobile = /iPhone|Android/i.test(navigator.userAgent);
@@ -18,14 +16,14 @@ export default function DonationSection() {
         {isMobile ? (
           <a
             href={SWISH_DEEP_LINK}
-            className="inline-flex items-center gap-2 px-6 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground font-bold text-sm rounded-full transition-all active:scale-95"
+            className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-4 min-h-[56px] bg-accent-brand text-black font-bold text-lg rounded-full transition-all active:scale-95"
           >
-            <Smartphone size={15} /> Öppna Swish
+            <Smartphone size={18} /> Öppna Swish
           </a>
         ) : (
           <div className="flex flex-col items-center gap-3">
-            <img src={QR_URL} alt="Swish QR" className="w-28 h-28 rounded-xl" />
-            <p className="text-xs text-muted-foreground/50">{SWISH_DISPLAY}</p>
+            <p className="text-4xl sm:text-5xl font-black tracking-wide text-white">{SWISH_NUMBER}</p>
+            <p className="text-xs text-muted-foreground/50">Öppna Swish och ange numret manuellt</p>
           </div>
         )}
       </div>

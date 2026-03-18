@@ -1,8 +1,8 @@
 import snitchLogo from "@/assets/logosnitch.png";
 import { Smartphone } from "lucide-react";
 
+const SWISH_NUMBER = "0729626225";
 const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
-const QR_URL = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(SWISH_DEEP_LINK)}&bgcolor=000000&color=ffffff&margin=12`;
 
 export default function Om() {
   const isMobile = /iPhone|Android/i.test(navigator.userAgent);
@@ -40,17 +40,15 @@ export default function Om() {
             {isMobile ? (
               <a
                 href={SWISH_DEEP_LINK}
-                className="inline-flex items-center gap-2 px-6 py-3 bg-white text-black font-bold text-sm rounded-full hover:bg-white/90 transition-all"
+                className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-4 min-h-[56px] bg-accent-brand text-black font-bold text-lg rounded-full hover:bg-accent-brand/90 transition-all"
               >
-                <Smartphone size={16} />
+                <Smartphone size={18} />
                 Öppna Swish
               </a>
             ) : (
               <div className="flex flex-col items-start gap-3">
-                <div className="p-3 bg-black border border-white/10 rounded-xl">
-                  <img src={QR_URL} alt="Swish QR" className="w-36 h-36 rounded-lg" />
-                </div>
-                <p className="text-xs text-white/30">Skanna med Swish i mobilen</p>
+                <p className="text-4xl sm:text-5xl font-black tracking-wide text-white">{SWISH_NUMBER}</p>
+                <p className="text-xs text-white/30">Öppna Swish och ange numret manuellt</p>
               </div>
             )}
           </div>
