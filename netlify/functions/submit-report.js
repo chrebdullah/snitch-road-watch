@@ -38,15 +38,37 @@ function parseEmailList(value) {
     .filter(Boolean);
 }
 
+function readEnv(name) {
+  try {
+    if (typeof Netlify !== "undefined" && Netlify?.env?.get) {
+      const value = Netlify.env.get(name);
+      return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+    }
+  } catch {
+    // Fallback till process.env i lokala miljöer.
+  }
+
+  const value = process.env[name];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 function isValidEmail(value) {
   if (!value) return false;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-const REQUIRED_NOTIFICATION_RECIPIENTS = [
-  "snitchsweden@gmail.com",
-  "christianremrod@gmail.com",
-];
+function resolveResendApiKey() {
+  const candidates = ["RESEND_API_KEY", "SNITCH_RESEND_API_KEY", "RESEND_KEY"];
+  for (const envName of candidates) {
+    const value = readEnv(envName);
+    if (value) {
+      return { key: value, source: envName };
+    }
+  }
+  return { key: null, source: null };
+}
+
+const LAST_RESORT_NOTIFICATION_RECIPIENT = "snitchsweden@gmail.com";
 
 function jsonResponse(statusCode, body) {
   return {
@@ -58,8 +80,18 @@ function jsonResponse(statusCode, body) {
 
 function extractMissingColumn(error) {
   const message = error?.message || "";
-  const match = message.match(/Could not find the '([^']+)' column/i);
-  return match?.[1] ?? null;
+  const patterns = [
+    /Could not find the '([^']+)' column/i,
+    /column "?([a-zA-Z0-9_]+)"? does not exist/i,
+    /Could not find column '([^']+)'/i,
+  ];
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return null;
 }
 
 async function sendResendEmail({ apiKey, from, to, subject, html }) {
@@ -78,6 +110,54 @@ async function sendResendEmail({ apiKey, from, to, subject, html }) {
 
   const raw = await response.text();
   return { ok: false, error: raw.slice(0, 300) };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function sendResendEmailWithRetry(params, maxAttempts = 3) {
+  let lastResult = { ok: false, error: "Okänt e-postfel" };
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    lastResult = await sendResendEmail(params);
+    if (lastResult.ok) {
+      return lastResult;
+    }
+    if (attempt < maxAttempts) {
+      await wait(250 * attempt);
+    }
+  }
+  return lastResult;
+}
+
+function resolveNotificationRecipients(requestId) {
+  const primaryConfigured = parseEmailList(readEnv("SNITCH_TO_EMAIL")).filter(isValidEmail);
+  const fallbackConfigured = parseEmailList(readEnv("SNITCH_TO_EMAIL_FALLBACK")).filter(isValidEmail);
+
+  let usedHardcodedFallback = false;
+  let recipients = [...primaryConfigured, ...fallbackConfigured];
+
+  if (recipients.length === 0 && isValidEmail(LAST_RESORT_NOTIFICATION_RECIPIENT)) {
+    recipients = [LAST_RESORT_NOTIFICATION_RECIPIENT];
+    usedHardcodedFallback = true;
+    console.warn(`[${requestId}] Recipient env vars missing. Using hardcoded emergency fallback recipient.`, {
+      fallback_recipient: LAST_RESORT_NOTIFICATION_RECIPIENT,
+    });
+  }
+
+  const uniqueRecipients = [...new Set(recipients.map((entry) => entry.toLowerCase()))];
+  const primaryRecipient =
+    primaryConfigured[0]?.toLowerCase() ||
+    fallbackConfigured[0]?.toLowerCase() ||
+    (usedHardcodedFallback ? LAST_RESORT_NOTIFICATION_RECIPIENT.toLowerCase() : null);
+
+  return {
+    recipients: uniqueRecipients,
+    primaryRecipient,
+    usedHardcodedFallback,
+  };
 }
 
 async function insertAdaptiveRecord(supabase, record) {
@@ -154,6 +234,28 @@ async function insertReportWithSchemaFallback(supabase, baseRecord) {
   return { data: null, error: lastError, schema: "failed", fields: [] };
 }
 
+async function updateDeliveryFieldsWithFallback(supabase, reportId, deliveryFields) {
+  const candidate = { ...deliveryFields };
+  let lastError = null;
+
+  while (Object.keys(candidate).length > 0) {
+    const { error } = await supabase.from("reports").update(candidate).eq("id", reportId);
+    if (!error) {
+      return { error: null, fields: Object.keys(candidate) };
+    }
+
+    lastError = error;
+    const missingColumn = extractMissingColumn(error);
+    if (missingColumn && Object.prototype.hasOwnProperty.call(candidate, missingColumn)) {
+      delete candidate[missingColumn];
+      continue;
+    }
+    break;
+  }
+
+  return { error: lastError, fields: Object.keys(candidate) };
+}
+
 export const handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers: CORS_HEADERS, body: "" };
@@ -163,13 +265,16 @@ export const handler = async (event) => {
     return jsonResponse(405, { error: "Method not allowed" });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const requestId = `submit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const supabaseUrl = readEnv("SUPABASE_URL") ?? readEnv("VITE_SUPABASE_URL");
   const supabaseKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.SUPABASE_ANON_KEY ??
-    process.env.VITE_SUPABASE_ANON_KEY ??
-    process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  const resendApiKey = process.env.RESEND_API_KEY;
+    readEnv("SUPABASE_SERVICE_ROLE_KEY") ??
+    readEnv("SUPABASE_ANON_KEY") ??
+    readEnv("VITE_SUPABASE_ANON_KEY") ??
+    readEnv("VITE_SUPABASE_PUBLISHABLE_KEY");
+  const { key: resendApiKey, source: resendApiKeySource } = resolveResendApiKey();
+  console.info(`[${requestId}] Incoming submit-report request`);
+  console.info(`[${requestId}] Resend key status: ${resendApiKey ? "exists" : "missing"}${resendApiKeySource ? ` (${resendApiKeySource})` : ""}`);
   let backupStore = null;
   try {
     backupStore = getStore("snitch-report-backups");
@@ -244,7 +349,12 @@ export const handler = async (event) => {
     let backupSaved = false;
     let backupError = backupStore ? null : "Backup-lagring ej tillgänglig i denna miljö.";
     let emailSent = false;
+    let emailSentAt = null;
     let emailError = null;
+    let emailRecipients = [];
+    let emailRecipient = null;
+    let supabaseDeliveryError = null;
+    let supabaseDeliveryFields = [];
     const locationText = address || (latitude !== null && longitude !== null ? `${latitude}, ${longitude}` : "-");
 
     if (backupStore) {
@@ -268,20 +378,25 @@ export const handler = async (event) => {
     }
 
     if (resendApiKey) {
-      const recipients = [
-        ...REQUIRED_NOTIFICATION_RECIPIENTS,
-        ...parseEmailList(process.env.SNITCH_TO_EMAIL || "snitchsweden@gmail.com"),
-        ...parseEmailList(process.env.SNITCH_TO_EMAIL_FALLBACK),
-      ];
-      const uniqueRecipients = [...new Set(recipients.map((entry) => entry.toLowerCase()))].filter(isValidEmail);
+      const { recipients: uniqueRecipients, primaryRecipient, usedHardcodedFallback } =
+        resolveNotificationRecipients(requestId);
+      emailRecipients = uniqueRecipients;
+      emailRecipient = uniqueRecipients.join(", ").slice(0, 240) || null;
+      console.info(`[${requestId}] Email recipient list resolved`, {
+        count: uniqueRecipients.length,
+        recipients: uniqueRecipients,
+        primary_recipient: primaryRecipient,
+        hardcoded_fallback_used: usedHardcodedFallback,
+      });
       const mediaSection = mediaSignedUrl
         ? `<p><strong>Bild:</strong> <a href="${escapeHtml(mediaSignedUrl)}">Öppna bilaga</a></p>`
         : "<p><strong>Bild:</strong> Ingen</p>";
       if (uniqueRecipients.length === 0) {
-        emailError = "SNITCH_TO_EMAIL saknas i miljövariabler.";
+        emailError = "Inga giltiga email-mottagare konfigurerade.";
+        console.error(`[${requestId}] Email sending skipped: recipient list empty`);
       } else {
         try {
-          const from = process.env.SNITCH_FROM_EMAIL || "onboarding@resend.dev";
+          const from = readEnv("SNITCH_FROM_EMAIL") || "onboarding@resend.dev";
           const subject = "Ny rapport inkommen - SNITCH";
           const html = `<h2>Ny rapport</h2>
                 <p><strong>Regnr:</strong> ${escapeHtml(regNumber)}</p>
@@ -291,7 +406,7 @@ export const handler = async (event) => {
                 ${mediaSection}
                 <p><strong>Rapport-ID:</strong> ${escapeHtml(insertedReport?.id || "okand")}</p>`;
 
-          const batchResult = await sendResendEmail({
+          const batchResult = await sendResendEmailWithRetry({
             apiKey: resendApiKey,
             from,
             to: uniqueRecipients,
@@ -300,13 +415,18 @@ export const handler = async (event) => {
           });
 
           if (batchResult.ok) {
-            emailSent = true;
+            emailSent = Boolean(primaryRecipient);
+            emailSentAt = emailSent ? new Date().toISOString() : null;
+            if (!primaryRecipient) {
+              emailError = "Primär mottagare kunde inte avgöras från konfigurationen.";
+            }
+            console.info(`[${requestId}] Resend send success`, { recipients: uniqueRecipients });
           } else {
             const successfulRecipients = [];
             const failedRecipients = [];
 
             for (const recipient of uniqueRecipients) {
-              const singleResult = await sendResendEmail({
+              const singleResult = await sendResendEmailWithRetry({
                 apiKey: resendApiKey,
                 from,
                 to: [recipient],
@@ -323,7 +443,10 @@ export const handler = async (event) => {
               }
             }
 
-            emailSent = successfulRecipients.includes("snitchsweden@gmail.com");
+            emailSent = primaryRecipient ? successfulRecipients.includes(primaryRecipient) : false;
+            if (emailSent) {
+              emailSentAt = new Date().toISOString();
+            }
 
             if (emailSent && failedRecipients.length > 0) {
               emailError = `Vissa mottagare misslyckades: ${failedRecipients
@@ -336,21 +459,67 @@ export const handler = async (event) => {
                 .join(" | ")
                 .slice(0, 300)}`;
             }
+            console.error(`[${requestId}] Resend send failure`, {
+              email_sent: emailSent,
+              email_error: emailError,
+              failed_recipients: failedRecipients.map((entry) => entry.recipient),
+            });
           }
         } catch (error) {
           emailError = error instanceof Error ? `Email misslyckades: ${error.message.slice(0, 220)}` : "Email misslyckades.";
+          console.error(`[${requestId}] Resend request threw exception`, {
+            error: emailError,
+            recipients: uniqueRecipients,
+          });
         }
       }
     } else {
-      emailError = "RESEND_API_KEY saknas i miljövariabler.";
+      emailError = "Resend API-nyckel saknas (RESEND_API_KEY/SNITCH_RESEND_API_KEY/RESEND_KEY).";
+      console.error(`[${requestId}] Resend key missing. Email not sent.`);
     }
 
-    if (!emailSent && backupStore) {
+    if (insertedReport?.id) {
+      const deliveryUpdate = {
+        email_sent: emailSent,
+        email_error: emailError,
+        email_recipient: emailRecipient,
+        email_sent_at: emailSentAt,
+      };
+      const { error: deliveryError, fields } = await updateDeliveryFieldsWithFallback(
+        supabase,
+        insertedReport.id,
+        deliveryUpdate
+      );
+      supabaseDeliveryFields = fields;
+      if (deliveryError) {
+        supabaseDeliveryError = deliveryError.message?.slice(0, 220) || "Kunde inte uppdatera email-fält i Supabase.";
+        console.error(`[${requestId}] Supabase delivery update failed`, {
+          report_id: insertedReport.id,
+          error: supabaseDeliveryError,
+        });
+      } else {
+        console.info(`[${requestId}] Supabase delivery update success`, {
+          report_id: insertedReport.id,
+          fields,
+          email_sent: emailSent,
+        });
+      }
+    }
+
+    if (backupStore) {
       try {
         await backupStore.setJSON(`${backupKey}/delivery`, {
           id: insertedReport?.id ?? null,
-          email_sent: false,
+          email_sent: emailSent,
           email_error: emailError,
+          email_recipient: emailRecipient,
+          email_sent_at: emailSentAt,
+          email_recipient_count: emailRecipients.length,
+          email_recipients: emailRecipients,
+          resend_api_key_status: resendApiKey ? "exists" : "missing",
+          resend_api_key_source: resendApiKeySource,
+          supabase_delivery_saved_fields: supabaseDeliveryFields,
+          supabase_delivery_error: supabaseDeliveryError,
           saved_at: new Date().toISOString(),
         });
       } catch {
@@ -368,6 +537,10 @@ export const handler = async (event) => {
       backup_error: backupError,
       email_sent: emailSent,
       email_error: emailError,
+      email_recipient: emailRecipient,
+      email_sent_at: emailSentAt,
+      supabase_delivery_error: supabaseDeliveryError,
+      notification_status: "accepted",
     });
   } catch (error) {
     return jsonResponse(500, {

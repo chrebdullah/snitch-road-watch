@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { Camera, MapPin, Upload, CheckCircle, AlertCircle, Smartphone } from "lucide-react";
+import { Camera, MapPin, Upload, CheckCircle, Smartphone } from "lucide-react";
 
 type Status = "idle" | "uploading" | "success" | "error";
 
@@ -70,7 +70,6 @@ export default function Rapportera() {
   const [happenedAt, setHappenedAt] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
-  const [infoMsg, setInfoMsg] = useState("");
   const [honeypotValue, setHoneypotValue] = useState("");
   const cameraRef = useRef<HTMLInputElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -134,7 +133,6 @@ export default function Rapportera() {
 
     setStatus("uploading");
     setErrorMsg("");
-    setInfoMsg("");
 
     try {
       if (honeypotValue.trim()) {
@@ -216,8 +214,9 @@ export default function Rapportera() {
       };
 
       let payload: Record<string, unknown> = {};
+      const submitReportEndpoint = new URL("/.netlify/functions/submit-report", window.location.origin).toString();
       try {
-        const response = await fetch("/.netlify/functions/submit-report", {
+        const response = await fetch(submitReportEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestPayload),
@@ -237,19 +236,15 @@ export default function Rapportera() {
               : fallback || "Något gick fel vid inskick.";
           throw new Error(message);
         }
-      } catch (functionCallError) {
-        await saveReportDirectly();
-        const fallbackMessage =
-          functionCallError instanceof Error ? functionCallError.message : "Okänt fel i serverfunktionen.";
-        setInfoMsg(`Rapporten sparades i reservläge. Notiser kan vara fördröjda. (${fallbackMessage.slice(0, 100)})`);
-        setStatus("success");
-        return;
-      }
-
-      if (payload?.email_sent === false) {
-        const reportId = typeof payload?.id === "string" ? payload.id : "";
-        const suffix = reportId ? ` Referens: ${reportId}.` : "";
-        setInfoMsg(`Rapporten sparades, men e-postnotisen kunde inte skickas just nu.${suffix}`);
+      } catch {
+        if (import.meta.env.DEV) {
+          await saveReportDirectly();
+          setStatus("success");
+          return;
+        }
+        throw new Error(
+          "Kunde inte nå rapportfunktionen i produktion. Rapporten sparades inte lokalt för att undvika tappad e-postnotis."
+        );
       }
 
       setStatus("success");
@@ -273,12 +268,6 @@ export default function Rapportera() {
               <Smartphone size={15} /> Stöd via Swish
             </a>
           )}
-          {infoMsg && (
-            <div className="flex items-center justify-center gap-2 p-3 rounded-xl bg-accent-brand/10 border border-accent-brand/40 text-xs text-accent-brand-foreground">
-              <AlertCircle size={14} />
-              {infoMsg}
-            </div>
-          )}
           <button
             onClick={() => {
               if (filePreview) {
@@ -293,7 +282,6 @@ export default function Rapportera() {
               setHappenedAt("");
               setAddress("");
               setErrorMsg("");
-              setInfoMsg("");
             }}
             className="px-6 py-3 min-h-[48px] border border-border text-muted-foreground text-sm font-medium rounded-full hover:border-foreground/30 hover:text-foreground transition-all"
           >
