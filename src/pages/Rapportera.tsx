@@ -6,10 +6,14 @@ type Status = "idle" | "uploading" | "success" | "error";
 const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
 const STORAGE_BUCKET = (import.meta.env.VITE_REPORT_MEDIA_BUCKET ?? "report-media").trim() || "report-media";
 
-const SWISH_DEEP_LINK = "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
+const SWISH_DEEP_LINK =
+  "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, SUPABASE_ANON_KEY);
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 type UploadFailureKind = "bucket_missing" | "permission_denied" | "network" | "unknown";
 
@@ -35,14 +39,15 @@ function readSupabaseStorageError(error: unknown): SupabaseStorageErrorInfo {
     typeof rawStatusCode === "number"
       ? rawStatusCode
       : typeof rawStatusCode === "string" && Number.isFinite(Number(rawStatusCode))
-      ? Number(rawStatusCode)
-      : null;
+        ? Number(rawStatusCode)
+        : null;
+
   const errorCode =
     typeof candidate.error === "string"
       ? candidate.error
       : typeof candidate.code === "string"
-      ? candidate.code
-      : null;
+        ? candidate.code
+        : null;
 
   return { message, statusCode, errorCode };
 }
@@ -51,11 +56,18 @@ function isNetworkError(message: string): boolean {
   return /failed to fetch|fetch failed|network|load failed|networkerror/i.test(message);
 }
 
-function classifyUploadFailure(error: unknown): { kind: UploadFailureKind; userMessage: string; details: SupabaseStorageErrorInfo } {
+function classifyUploadFailure(error: unknown): {
+  kind: UploadFailureKind;
+  userMessage: string;
+  details: SupabaseStorageErrorInfo;
+} {
   const details = readSupabaseStorageError(error);
   const lowered = details.message.toLowerCase();
 
-  if (details.statusCode === 404 || /bucket.+not found|does not exist|invalid bucket/i.test(details.message)) {
+  if (
+    details.statusCode === 404 ||
+    /bucket.+not found|does not exist|invalid bucket/i.test(details.message)
+  ) {
     return {
       kind: "bucket_missing",
       userMessage: `Bilduppladdning är inte korrekt konfigurerad. Bucketen "${STORAGE_BUCKET}" saknas i Supabase Storage.`,
@@ -70,7 +82,7 @@ function classifyUploadFailure(error: unknown): { kind: UploadFailureKind; userM
   ) {
     return {
       kind: "permission_denied",
-      userMessage: "Bilduppladdning nekades av Supabase Storage (saknad behörighet/policy).",
+      userMessage: "Bilduppladdning nekades av Supabase Storage (saknad behörighet eller policy).",
       details,
     };
   }
@@ -155,8 +167,10 @@ export default function Rapportera() {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [honeypotValue, setHoneypotValue] = useState("");
+
   const cameraRef = useRef<HTMLInputElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
+
   const userAgent = navigator.userAgent;
   const isMobile = /iPhone|Android/i.test(userAgent);
   const supportsDirectCameraCapture = /Android/i.test(userAgent);
@@ -238,17 +252,14 @@ export default function Rapportera() {
     setFilePreview(null);
     setPreviewFailed(false);
     setUploadedImagePath(null);
-    if (cameraRef.current) {
-      cameraRef.current.value = "";
-    }
-    if (uploadRef.current) {
-      uploadRef.current.value = "";
-    }
+    if (cameraRef.current) cameraRef.current.value = "";
+    if (uploadRef.current) uploadRef.current.value = "";
   };
 
   const openFilePicker = (targetRef: React.RefObject<HTMLInputElement>) => {
     const input = targetRef.current;
     if (!input) return;
+
     try {
       if ("showPicker" in input && typeof input.showPicker === "function") {
         input.showPicker();
@@ -257,6 +268,7 @@ export default function Rapportera() {
     } catch (error) {
       console.error("showPicker misslyckades, fallback till click():", error);
     }
+
     input.click();
   };
 
@@ -269,7 +281,7 @@ export default function Rapportera() {
     }
 
     if (!location && !address.trim()) {
-      setErrorMsg("Plats krävs. Tillåt GPS eller ange en adress.");
+      setErrorMsg("Plats krävs. Tillåt GPS eller ange adress.");
       return;
     }
 
@@ -307,32 +319,6 @@ export default function Rapportera() {
         });
 
         try {
-          const bucketCheck = await supabase.storage.getBucket(STORAGE_BUCKET);
-          if (bucketCheck.error) {
-            const classifiedBucketError = classifyUploadFailure(bucketCheck.error);
-            if (classifiedBucketError.kind === "bucket_missing" || classifiedBucketError.kind === "network") {
-              console.error("Supabase storage bucket check failed", {
-                supabaseErrorMessage: classifiedBucketError.details.message,
-                statusCode: classifiedBucketError.details.statusCode,
-                errorCode: classifiedBucketError.details.errorCode,
-                bucketName: STORAGE_BUCKET,
-                filePath: mediaPath,
-                fileSize: file.size,
-                mimeType: file.type,
-              });
-              throw new Error(classifiedBucketError.userMessage);
-            }
-            console.warn("Supabase storage bucket could not be verified before upload", {
-              supabaseErrorMessage: classifiedBucketError.details.message,
-              statusCode: classifiedBucketError.details.statusCode,
-              errorCode: classifiedBucketError.details.errorCode,
-              bucketName: STORAGE_BUCKET,
-              filePath: mediaPath,
-              fileSize: file.size,
-              mimeType: file.type,
-            });
-          }
-
           const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(mediaPath, file, {
             upsert: false,
             contentType: file.type,
@@ -374,6 +360,7 @@ export default function Rapportera() {
         happened_at: !happenedNow && happenedAt ? new Date(happenedAt).toISOString() : null,
         media_path: mediaPath,
       };
+
       console.info("[Rapportera] payload sent with image field", {
         media_path: requestPayload.media_path,
       });
@@ -423,6 +410,7 @@ export default function Rapportera() {
 
       let payload: Record<string, unknown> = {};
       const submitReportEndpoint = new URL("/.netlify/functions/submit-report", window.location.origin).toString();
+
       try {
         const response = await fetch(submitReportEndpoint, {
           method: "POST",
@@ -431,11 +419,13 @@ export default function Rapportera() {
         });
 
         const rawText = await response.text();
+
         try {
           payload = rawText ? JSON.parse(rawText) : {};
         } catch {
           payload = {};
         }
+
         if (!response.ok) {
           const fallback = rawText.trim().slice(0, 120);
           const message =
@@ -450,6 +440,7 @@ export default function Rapportera() {
           setStatus("success");
           return;
         }
+
         throw new Error(
           "Kunde inte nå rapportfunktionen i produktion. Rapporten sparades inte lokalt för att undvika tappad e-postnotis."
         );
@@ -471,11 +462,16 @@ export default function Rapportera() {
             Tack! Rapporten är mottagen.
           </h1>
           <p className="text-muted-foreground">Behandlas anonymt och konfidentiellt.</p>
+
           {isMobile && (
-            <a href={SWISH_DEEP_LINK} className="inline-flex items-center gap-2 px-6 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground font-bold text-sm rounded-full transition-all">
+            <a
+              href={SWISH_DEEP_LINK}
+              className="inline-flex items-center gap-2 px-6 py-3 min-h-[48px] bg-accent-brand text-accent-brand-foreground font-bold text-sm rounded-full transition-all"
+            >
               <Smartphone size={15} /> Stöd via Swish
             </a>
           )}
+
           <button
             onClick={() => {
               if (filePreview) {
@@ -511,11 +507,20 @@ export default function Rapportera() {
 
         <form onSubmit={handleSubmit} className="space-y-5 animate-fade-in-up">
           <div className="absolute -left-[9999px] -top-[9999px]" aria-hidden="true">
-            <input type="text" name="website" value={honeypotValue} onChange={(e) => setHoneypotValue(e.target.value)} tabIndex={-1} autoComplete="off" />
+            <input
+              type="text"
+              name="website"
+              value={honeypotValue}
+              onChange={(e) => setHoneypotValue(e.target.value)}
+              tabIndex={-1}
+              autoComplete="off"
+            />
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Registreringsnummer *</label>
+            <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">
+              Registreringsnummer *
+            </label>
             <input
               type="text"
               value={regNumber}
@@ -528,7 +533,9 @@ export default function Rapportera() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Plats *</label>
+            <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">
+              Plats *
+            </label>
             <button
               type="button"
               onClick={requestLocation}
@@ -536,8 +543,8 @@ export default function Rapportera() {
                 locationStatus === "granted"
                   ? "border-green-500/30 bg-green-500/10 text-green-400"
                   : locationStatus === "denied"
-                  ? "border-border bg-secondary text-muted-foreground"
-                  : "border-border text-muted-foreground hover:border-foreground/30"
+                    ? "border-border bg-secondary text-muted-foreground"
+                    : "border-border text-muted-foreground hover:border-foreground/30"
               }`}
             >
               <MapPin size={16} />
@@ -546,6 +553,7 @@ export default function Rapportera() {
               {locationStatus === "granted" && "✓ Plats registrerad"}
               {locationStatus === "denied" && "GPS ej tillgänglig – ange adress nedan"}
             </button>
+
             {locationStatus === "denied" && (
               <input
                 type="text"
@@ -558,23 +566,63 @@ export default function Rapportera() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Tidpunkt *</label>
+            <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">
+              Tidpunkt *
+            </label>
+
             <div className="flex gap-3">
-              <button type="button" onClick={() => setHappenedNow(true)} className={`flex-1 px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${happenedNow ? "border-accent-brand bg-accent-brand/10 text-accent-brand" : "border-border text-muted-foreground"}`}>
+              <button
+                type="button"
+                onClick={() => setHappenedNow(true)}
+                className={`flex-1 px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${
+                  happenedNow
+                    ? "border-accent-brand bg-accent-brand/10 text-accent-brand"
+                    : "border-border text-muted-foreground"
+                }`}
+              >
                 Just nu
               </button>
-              <button type="button" onClick={() => setHappenedNow(false)} className={`flex-1 px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${!happenedNow ? "border-accent-brand bg-accent-brand/10 text-accent-brand" : "border-border text-muted-foreground"}`}>
+
+              <button
+                type="button"
+                onClick={() => setHappenedNow(false)}
+                className={`flex-1 px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${
+                  !happenedNow
+                    ? "border-accent-brand bg-accent-brand/10 text-accent-brand"
+                    : "border-border text-muted-foreground"
+                }`}
+              >
                 Annan tid
               </button>
             </div>
+
             {!happenedNow && (
-              <input type="datetime-local" value={happenedAt} onChange={(e) => setHappenedAt(e.target.value)} className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 min-h-[48px] text-foreground focus:outline-none focus:border-foreground/30 transition-colors" />
+              <input
+                type="datetime-local"
+                value={happenedAt}
+                onChange={(e) => setHappenedAt(e.target.value)}
+                className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 min-h-[48px] text-foreground focus:outline-none focus:border-foreground/30 transition-colors"
+              />
             )}
           </div>
 
           <div className="relative border-2 border-dashed border-border rounded-2xl p-6 text-center transition-colors">
-            <input ref={cameraRef} type="file" accept="image/*" capture={supportsDirectCameraCapture ? "environment" : undefined} className="hidden" onChange={handleFile} />
-            <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+            <input
+              ref={cameraRef}
+              type="file"
+              accept="image/*"
+              capture={supportsDirectCameraCapture ? "environment" : undefined}
+              className="hidden"
+              onChange={handleFile}
+            />
+            <input
+              ref={uploadRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleFile}
+            />
+
             {file && filePreview && !previewFailed ? (
               <div className="space-y-3">
                 <img
@@ -587,7 +635,7 @@ export default function Rapportera() {
                     setErrorMsg("Kunde inte visa bilden. Ta bort den och välj en ny.");
                   }}
                 />
-                <p className="text-xs text-muted-foreground">{file?.name}</p>
+                <p className="text-xs text-muted-foreground">{file.name}</p>
                 <button
                   type="button"
                   onClick={clearSelectedFile}
@@ -617,6 +665,7 @@ export default function Rapportera() {
                 <p className="text-xs text-muted-foreground/40">EXIF rensas automatiskt</p>
               </div>
             )}
+
             <div className="mt-4 flex gap-3">
               <button
                 type="button"
@@ -625,6 +674,7 @@ export default function Rapportera() {
               >
                 Ta foto
               </button>
+
               <button
                 type="button"
                 onClick={() => openFilePicker(uploadRef)}
@@ -635,7 +685,13 @@ export default function Rapportera() {
             </div>
           </div>
 
-          <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Kommentar (valfritt)" rows={2} className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors resize-none" />
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Kommentar (valfritt)"
+            rows={2}
+            className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors resize-none"
+          />
 
           {errorMsg && (
             <div className="flex items-center gap-2 p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
@@ -643,7 +699,11 @@ export default function Rapportera() {
             </div>
           )}
 
-          <button type="submit" disabled={status === "uploading" || isImageUploadInProgress} className="w-full py-4 min-h-[56px] bg-accent-brand text-accent-brand-foreground font-bold text-lg rounded-full hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50">
+          <button
+            type="submit"
+            disabled={status === "uploading" || isImageUploadInProgress}
+            className="w-full py-4 min-h-[56px] bg-accent-brand text-accent-brand-foreground font-bold text-lg rounded-full hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50"
+          >
             {status === "uploading" ? "Skickar..." : "SKICKA RAPPORT"}
           </button>
 
