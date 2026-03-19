@@ -16,6 +16,11 @@ type DashboardStatsResponse = {
   last_24h_reports: number;
   unique_locations: number;
   latest_incidents: Incident[];
+  error?: string;
+  details?: string | null;
+  hint?: string | null;
+  code?: string | null;
+  request_id?: string;
 };
 
 function formatDate(dateStr: string): string {
@@ -27,27 +32,52 @@ function formatDate(dateStr: string): string {
 }
 
 export default function StatsSection() {
-  const [totalReports, setTotalReports] = useState(0);
-  const [last24h, setLast24h] = useState(0);
-  const [uniqueCities, setUniqueCities] = useState(0);
+  const [totalReports, setTotalReports] = useState<number | null>(null);
+  const [last24h, setLast24h] = useState<number | null>(null);
+  const [uniqueCities, setUniqueCities] = useState<number | null>(null);
   const [latestIncidents, setLatestIncidents] = useState<Incident[]>([]);
+  const [statsError, setStatsError] = useState<string | null>(null);
 
   const fetchStats = async () => {
     try {
+      setStatsError(null);
       const endpoint = new URL("/.netlify/functions/dashboard-stats", window.location.origin).toString();
       const response = await fetch(endpoint, { method: "GET" });
       const payload = (await response.json()) as DashboardStatsResponse;
 
       if (!response.ok) {
-        throw new Error("Kunde inte hämta dashboard-statistik.");
+        const failureMessage = payload?.error || `Kunde inte hämta dashboard-statistik (HTTP ${response.status}).`;
+        console.error("StatsSection: dashboard-statistik misslyckades", {
+          endpoint,
+          status: response.status,
+          error: payload?.error || null,
+          details: payload?.details || null,
+          hint: payload?.hint || null,
+          code: payload?.code || null,
+          request_id: payload?.request_id || null,
+        });
+        setStatsError(failureMessage);
+        setTotalReports(null);
+        setLast24h(null);
+        setUniqueCities(null);
+        setLatestIncidents([]);
+        return;
       }
 
-      setTotalReports(payload.total_reports ?? 0);
-      setLast24h(payload.last_24h_reports ?? 0);
-      setUniqueCities(payload.unique_locations ?? 0);
+      setTotalReports(typeof payload.total_reports === "number" ? payload.total_reports : 0);
+      setLast24h(typeof payload.last_24h_reports === "number" ? payload.last_24h_reports : 0);
+      setUniqueCities(typeof payload.unique_locations === "number" ? payload.unique_locations : 0);
       setLatestIncidents(Array.isArray(payload.latest_incidents) ? payload.latest_incidents : []);
     } catch (error) {
-      console.error("StatsSection: dashboard-statistik misslyckades", error);
+      const message = error instanceof Error ? error.message : "Okänt fel vid hämtning av dashboard-statistik.";
+      console.error("StatsSection: dashboard-statistik misslyckades", {
+        error: message,
+      });
+      setStatsError(message);
+      setTotalReports(null);
+      setLast24h(null);
+      setUniqueCities(null);
+      setLatestIncidents([]);
     }
   };
 
@@ -90,12 +120,20 @@ export default function StatsSection() {
             >
               <stat.icon size={24} className="mx-auto mb-3 text-accent-brand" />
               <div className="text-4xl font-display font-black text-foreground">
-                {stat.value}
+                {statsError ? "—" : (stat.value ?? "…")}
               </div>
               <div className="text-sm text-muted-foreground mt-1">{stat.label}</div>
             </div>
           ))}
         </div>
+
+        {statsError && (
+          <div className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+            <p className="text-sm text-red-200">
+              Dashboard-statistik kunde inte hämtas. Fel: {statsError}
+            </p>
+          </div>
+        )}
 
         <div className="mt-6 p-4 sm:p-5 rounded-2xl border border-border bg-card">
           <h3 className="text-sm font-semibold text-foreground mb-3">Senaste incidenter</h3>
