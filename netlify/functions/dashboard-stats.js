@@ -45,9 +45,35 @@ function formatCoordinateLabel(latitude, longitude) {
   return `${latitude.toFixed(3)}, ${longitude.toFixed(3)}`;
 }
 
-function resolveLocationLabel(row) {
-  const city = normalizeText(row.city);
-  if (city) return city;
+function resolveLocality(row) {
+  return normalizeText(row.city) || normalizeText(row.locality);
+}
+
+function resolveLatestIncidentLocationLabel(row) {
+  const address = normalizeText(row.address);
+  if (address) return address;
+
+  const locality = resolveLocality(row);
+  if (locality) return locality;
+
+  const municipality = normalizeText(row.municipality);
+  if (municipality) return municipality;
+
+  const latitude = toFiniteNumber(row.latitude ?? row.lat);
+  const longitude = toFiniteNumber(row.longitude ?? row.lng);
+  if (latitude !== null && longitude !== null) {
+    return `GPS ${formatCoordinateLabel(latitude, longitude)}`;
+  }
+
+  return "Plats saknas";
+}
+
+function resolveStatisticsLocationLabel(row) {
+  const locality = resolveLocality(row);
+  if (locality) return locality;
+
+  const municipality = normalizeText(row.municipality);
+  if (municipality) return municipality;
 
   const address = normalizeText(row.address);
   if (address) return address;
@@ -58,7 +84,7 @@ function resolveLocationLabel(row) {
     return `GPS ${formatCoordinateLabel(latitude, longitude)}`;
   }
 
-  return "Okänd plats";
+  return "Plats saknas";
 }
 
 function normalizeIncident(row) {
@@ -69,7 +95,7 @@ function normalizeIncident(row) {
     id: row.id,
     created_at: row.created_at,
     masked_reg: row.masked_reg || "***",
-    location_label: resolveLocationLabel(row),
+    location_label: resolveLatestIncidentLocationLabel(row),
     latitude,
     longitude,
     approved: Boolean(row.approved),
@@ -149,13 +175,13 @@ async function queryReportsWithColumnFallback(supabase, requestedColumns, limit)
 async function queryLatestReports(supabase) {
   return queryReportsWithColumnFallback(
     supabase,
-    ["id", "created_at", "masked_reg", "city", "address", "latitude", "longitude", "lat", "lng", "approved"],
+    ["id", "created_at", "masked_reg", "city", "locality", "municipality", "address", "latitude", "longitude", "lat", "lng", "approved"],
     8
   );
 }
 
 async function queryLocationRows(supabase) {
-  return queryReportsWithColumnFallback(supabase, ["city", "address", "latitude", "longitude", "lat", "lng"], 5000);
+  return queryReportsWithColumnFallback(supabase, ["city", "locality", "municipality", "address", "latitude", "longitude", "lat", "lng"], 5000);
 }
 
 export const handler = async (event) => {
@@ -246,7 +272,7 @@ export const handler = async (event) => {
   }
 
   const uniqueLocationLabels = new Set(
-    locationsResult.rows.map((row) => resolveLocationLabel(row)).filter((label) => label !== "Okänd plats")
+    locationsResult.rows.map((row) => resolveStatisticsLocationLabel(row)).filter((label) => label !== "Plats saknas")
   );
 
   const latestIncidents = latestResult.rows.map(normalizeIncident);

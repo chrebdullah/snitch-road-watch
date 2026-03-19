@@ -70,6 +70,8 @@ function resolveResendApiKey() {
 
 const LAST_RESORT_NOTIFICATION_RECIPIENT = "snitchsweden@gmail.com";
 const REPORT_MEDIA_BUCKET = (process.env.VITE_REPORT_MEDIA_BUCKET || "report-media").trim() || "report-media";
+const NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse";
+const NOMINATIM_USER_AGENT = "SNITCH/1.0 (snitcha.se; snitchsweden@gmail.com)";
 
 function jsonResponse(statusCode, body) {
   return {
@@ -100,6 +102,133 @@ function parseOptionalNumber(value) {
 function readFormString(form, key) {
   const value = form.get(key);
   return typeof value === "string" ? value : "";
+}
+
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function formatCoordinateLabel(latitude, longitude) {
+  return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+}
+
+function resolveLocationText({ address, locality, municipality, latitude, longitude }) {
+  const normalizedAddress = normalizeText(address);
+  if (normalizedAddress) return normalizedAddress;
+
+  const normalizedLocality = normalizeText(locality);
+  if (normalizedLocality) return normalizedLocality;
+
+  const normalizedMunicipality = normalizeText(municipality);
+  if (normalizedMunicipality) return normalizedMunicipality;
+
+  if (latitude !== null && longitude !== null) {
+    return `GPS ${formatCoordinateLabel(latitude, longitude)}`;
+  }
+
+  return "Plats saknas";
+}
+
+function pickFirstNonEmpty(values) {
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function buildAddressFallbackFromParts(addressParts) {
+  if (!addressParts || typeof addressParts !== "object") return "";
+
+  const road = pickFirstNonEmpty([
+    addressParts.road,
+    addressParts.pedestrian,
+    addressParts.cycleway,
+    addressParts.footway,
+    addressParts.path,
+    addressParts.residential,
+  ]);
+  const houseNumber = pickFirstNonEmpty([addressParts.house_number]);
+  const neighborhood = pickFirstNonEmpty([
+    addressParts.suburb,
+    addressParts.neighbourhood,
+    addressParts.city_district,
+    addressParts.quarter,
+    addressParts.hamlet,
+  ]);
+  const locality = pickFirstNonEmpty([
+    addressParts.city,
+    addressParts.town,
+    addressParts.village,
+    addressParts.locality,
+  ]);
+  const municipality = pickFirstNonEmpty([addressParts.municipality, addressParts.county]);
+
+  if (road) return `${road}${houseNumber ? ` ${houseNumber}` : ""}`.trim();
+  if (neighborhood) return neighborhood;
+  if (locality) return locality;
+  return municipality;
+}
+
+async function reverseGeocodeWithNominatim(latitude, longitude, requestId) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+
+  try {
+    const url = new URL(NOMINATIM_REVERSE_URL);
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("lat", String(latitude));
+    url.searchParams.set("lon", String(longitude));
+    url.searchParams.set("zoom", "18");
+    url.searchParams.set("addressdetails", "1");
+    url.searchParams.set("accept-language", "sv,en");
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "User-Agent": NOMINATIM_USER_AGENT,
+        Accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      console.warn(`[${requestId}] reverse geocoding failed`, {
+        service: "nominatim",
+        status: response.status,
+      });
+      return null;
+    }
+
+    const payload = await response.json();
+    const addressParts = payload?.address && typeof payload.address === "object" ? payload.address : {};
+    const locality = pickFirstNonEmpty([
+      addressParts.city,
+      addressParts.town,
+      addressParts.village,
+      addressParts.locality,
+    ]);
+    const municipality = pickFirstNonEmpty([addressParts.municipality, addressParts.county]);
+    const displayName = normalizeText(payload?.display_name);
+    const addressFallback = buildAddressFallbackFromParts(addressParts);
+    const resolvedAddress = displayName || addressFallback || "";
+
+    return {
+      address: resolvedAddress || null,
+      locality: locality || null,
+      city: locality || null,
+      municipality: municipality || null,
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "unknown error";
+    console.warn(`[${requestId}] reverse geocoding exception`, {
+      service: "nominatim",
+      reason,
+    });
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function normalizeImageExtension(fileName, mimeType) {
@@ -308,6 +437,9 @@ async function insertReportWithSchemaFallback(supabase, baseRecord) {
     latitude: baseRecord.latitude,
     longitude: baseRecord.longitude,
     address: baseRecord.address,
+    city: baseRecord.city,
+    locality: baseRecord.locality,
+    municipality: baseRecord.municipality,
     comment: baseRecord.comment,
     happened_on: baseRecord.happened_on,
     media_url: baseRecord.media_path,
@@ -321,6 +453,9 @@ async function insertReportWithSchemaFallback(supabase, baseRecord) {
     lat: baseRecord.latitude,
     lng: baseRecord.longitude,
     address: baseRecord.address,
+    city: baseRecord.city,
+    locality: baseRecord.locality,
+    municipality: baseRecord.municipality,
     comment: baseRecord.comment,
     happened_on: baseRecord.happened_on,
     image_url: baseRecord.media_path,
@@ -413,11 +548,14 @@ export const handler = async (event) => {
   }
 
   const regNumber = payload.reg_number;
-  const address = payload.address;
+  let address = payload.address;
   const comment = payload.comment;
   const latitude = payload.latitude;
   const longitude = payload.longitude;
   const happenedAt = payload.happened_at;
+  let city = null;
+  let locality = null;
+  let municipality = null;
 
   if (!regNumber) {
     return jsonResponse(400, { error: "Registreringsnummer saknas." });
@@ -425,6 +563,20 @@ export const handler = async (event) => {
 
   if ((latitude === null || longitude === null) && !address) {
     return jsonResponse(400, { error: "Plats saknas. Tillåt GPS eller skriv adress." });
+  }
+
+  if (latitude !== null && longitude !== null && !address) {
+    const geocoded = await reverseGeocodeWithNominatim(latitude, longitude, requestId);
+    if (geocoded) {
+      address = normalizeText(geocoded.address) || null;
+      city = normalizeText(geocoded.city) || null;
+      locality = normalizeText(geocoded.locality) || null;
+      municipality = normalizeText(geocoded.municipality) || null;
+    }
+  }
+
+  if (!address && latitude !== null && longitude !== null) {
+    address = `GPS ${formatCoordinateLabel(latitude, longitude)}`;
   }
 
   const happenedOn = toDateOnlyIso(happenedAt);
@@ -499,6 +651,9 @@ export const handler = async (event) => {
       latitude,
       longitude,
       address,
+      city,
+      locality,
+      municipality,
       comment,
       happened_on: happenedOn,
       media_path: mediaPath,
@@ -620,7 +775,13 @@ export const handler = async (event) => {
     let emailRecipient = null;
     let supabaseDeliveryError = null;
     let supabaseDeliveryFields = [];
-    const locationText = address || (latitude !== null && longitude !== null ? `${latitude}, ${longitude}` : "-");
+    const locationText = resolveLocationText({
+      address,
+      locality,
+      municipality,
+      latitude,
+      longitude,
+    });
 
     if (backupStore) {
       try {
@@ -632,6 +793,9 @@ export const handler = async (event) => {
           created_at: new Date().toISOString(),
           reg_number: regNumber,
           address,
+          city,
+          locality,
+          municipality,
           latitude,
           longitude,
           location_text: locationText,
