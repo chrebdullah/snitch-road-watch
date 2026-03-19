@@ -62,8 +62,6 @@ function classifyUploadFailure(error: unknown): {
   details: SupabaseStorageErrorInfo;
 } {
   const details = readSupabaseStorageError(error);
-  const lowered = details.message.toLowerCase();
-
   if (
     details.statusCode === 404 ||
     /bucket.+not found|does not exist|invalid bucket/i.test(details.message)
@@ -75,11 +73,7 @@ function classifyUploadFailure(error: unknown): {
     };
   }
 
-  if (
-    details.statusCode === 401 ||
-    details.statusCode === 403 ||
-    /not authorized|permission denied|row-level security|rls|access denied|unauthorized|forbidden/.test(lowered)
-  ) {
+  if (details.statusCode === 401 || details.statusCode === 403) {
     return {
       kind: "permission_denied",
       userMessage: "Bilduppladdning nekades av Supabase Storage (saknad behörighet eller policy).",
@@ -168,12 +162,10 @@ export default function Rapportera() {
   const [errorMsg, setErrorMsg] = useState("");
   const [honeypotValue, setHoneypotValue] = useState("");
 
-  const cameraRef = useRef<HTMLInputElement>(null);
-  const uploadRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const userAgent = navigator.userAgent;
   const isMobile = /iPhone|Android/i.test(userAgent);
-  const supportsDirectCameraCapture = /Android/i.test(userAgent);
 
   useEffect(() => {
     requestLocation();
@@ -252,8 +244,7 @@ export default function Rapportera() {
     setFilePreview(null);
     setPreviewFailed(false);
     setUploadedImagePath(null);
-    if (cameraRef.current) cameraRef.current.value = "";
-    if (uploadRef.current) uploadRef.current.value = "";
+    if (imageInputRef.current) imageInputRef.current.value = "";
   };
 
   const openFilePicker = (targetRef: React.RefObject<HTMLInputElement>) => {
@@ -327,6 +318,8 @@ export default function Rapportera() {
           if (uploadError) {
             const classified = classifyUploadFailure(uploadError);
             console.error("Supabase storage upload failed", {
+              kind: classified.kind,
+              rawError: uploadError,
               supabaseErrorMessage: classified.details.message,
               statusCode: classified.details.statusCode,
               errorCode: classified.details.errorCode,
@@ -608,15 +601,7 @@ export default function Rapportera() {
 
           <div className="relative border-2 border-dashed border-border rounded-2xl p-6 text-center transition-colors">
             <input
-              ref={cameraRef}
-              type="file"
-              accept="image/*"
-              capture={supportsDirectCameraCapture ? "environment" : undefined}
-              className="hidden"
-              onChange={handleFile}
-            />
-            <input
-              ref={uploadRef}
+              ref={imageInputRef}
               type="file"
               accept="image/*"
               className="hidden"
@@ -669,7 +654,7 @@ export default function Rapportera() {
             <div className="mt-4 flex gap-3">
               <button
                 type="button"
-                onClick={() => openFilePicker(cameraRef)}
+                onClick={() => openFilePicker(imageInputRef)}
                 className="flex-1 px-4 py-3 min-h-[48px] rounded-xl bg-secondary border border-border text-sm font-medium text-foreground"
               >
                 Ta foto
@@ -677,7 +662,7 @@ export default function Rapportera() {
 
               <button
                 type="button"
-                onClick={() => openFilePicker(uploadRef)}
+                onClick={() => openFilePicker(imageInputRef)}
                 className="flex-1 px-4 py-3 min-h-[48px] rounded-xl border border-border text-sm font-medium text-muted-foreground"
               >
                 Ladda upp bild
