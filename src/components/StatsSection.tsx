@@ -152,7 +152,7 @@ export default function StatsSection() {
                     {incident.masked_reg || "***"}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {incident.location_label || "Okänd plats"} · {formatDate(incident.created_at)}
+                    {incident.location_label || "Plats saknas"} · {formatDate(incident.created_at)}
                   </p>
                 </div>
                 <ExternalLink size={14} className="text-muted-foreground shrink-0" />
