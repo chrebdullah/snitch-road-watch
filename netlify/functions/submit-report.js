@@ -69,7 +69,8 @@ function resolveResendApiKey() {
 }
 
 const LAST_RESORT_NOTIFICATION_RECIPIENT = "snitchsweden@gmail.com";
-const REPORT_MEDIA_BUCKET = (readEnv("VITE_REPORT_MEDIA_BUCKET") ?? "report-media").trim() || "report-media";
+const REPORT_MEDIA_BUCKET =
+  (readEnv("REPORT_MEDIA_BUCKET") ?? readEnv("VITE_REPORT_MEDIA_BUCKET") ?? "report-media").trim() || "report-media";
 
 function jsonResponse(statusCode, body) {
   return {
@@ -267,13 +268,8 @@ export const handler = async (event) => {
   }
 
   const requestId = `submit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const supabaseUrl = readEnv("SUPABASE_URL") ?? readEnv("VITE_SUPABASE_URL");
-  const supabasePublicBaseUrl = readEnv("SUPABASE_URL");
-  const supabaseKey =
-    readEnv("SUPABASE_SERVICE_ROLE_KEY") ??
-    readEnv("SUPABASE_ANON_KEY") ??
-    readEnv("VITE_SUPABASE_ANON_KEY") ??
-    readEnv("VITE_SUPABASE_PUBLISHABLE_KEY");
+  const supabaseUrl = readEnv("SUPABASE_URL");
+  const supabaseServiceRoleKey = readEnv("SUPABASE_SERVICE_ROLE_KEY");
   const { key: resendApiKey, source: resendApiKeySource } = resolveResendApiKey();
   console.info(`[${requestId}] Incoming submit-report request`);
   console.info(`[${requestId}] Resend key status: ${resendApiKey ? "exists" : "missing"}${resendApiKeySource ? ` (${resendApiKeySource})` : ""}`);
@@ -285,8 +281,12 @@ export const handler = async (event) => {
     backupStore = null;
   }
 
-  if (!supabaseUrl || !supabaseKey) {
-    return jsonResponse(500, { error: "Servern saknar Supabase-konfiguration." });
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    console.error(`[${requestId}] Missing required server-side Supabase configuration`, {
+      has_supabase_url: Boolean(supabaseUrl),
+      has_service_role_key: Boolean(supabaseServiceRoleKey),
+    });
+    return jsonResponse(500, { error: "Servern saknar Supabase server-konfiguration." });
   }
 
   let payload;
@@ -325,7 +325,7 @@ export const handler = async (event) => {
   }
 
   const happenedOn = toDateOnlyIso(payload.happened_at);
-  const supabase = createClient(supabaseUrl, supabaseKey, {
+  const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
@@ -351,15 +351,32 @@ export const handler = async (event) => {
     let imageUrl = null;
     if (mediaPath) {
       try {
+        console.info(`[${requestId}] Attempting signed URL generation`, {
+          supabase_url: supabaseUrl,
+          bucket: REPORT_MEDIA_BUCKET,
+          media_path: mediaPath,
+        });
         const { data: signedUrlData, error: signedUrlError } = await supabase.storage
           .from(REPORT_MEDIA_BUCKET)
           .createSignedUrl(mediaPath, 3600);
 
         if (signedUrlError || !signedUrlData?.signedUrl) {
+          const signedUrlStatusCode =
+            signedUrlError?.statusCode ??
+            signedUrlError?.status ??
+            signedUrlError?.originalError?.status ??
+            null;
+          const signedUrlErrorMessage =
+            signedUrlError?.message ??
+            (signedUrlData?.signedUrl ? null : "missing signedUrl in response");
           console.warn(`[${requestId}] Signed URL generation failed`, {
+            supabase_url: supabaseUrl,
             bucket: REPORT_MEDIA_BUCKET,
             media_path: mediaPath,
-            reason: signedUrlError?.message?.slice(0, 220) ?? "missing signedUrl in response",
+            supabase_error_message: signedUrlErrorMessage,
+            status_code: signedUrlStatusCode,
+            troubleshooting:
+              "Kontrollera att objektet finns i bucketen, att media_path matchar exakt, och att SUPABASE_SERVICE_ROLE_KEY tillhor samma projekt som SUPABASE_URL.",
           });
         } else {
           imageUrl = signedUrlData.signedUrl;
@@ -369,21 +386,28 @@ export const handler = async (event) => {
           });
         }
       } catch (error) {
+        const statusCode =
+          error?.statusCode ??
+          error?.status ??
+          error?.cause?.status ??
+          null;
         console.warn(`[${requestId}] Signed URL generation failed`, {
+          supabase_url: supabaseUrl,
           bucket: REPORT_MEDIA_BUCKET,
           media_path: mediaPath,
-          reason: error instanceof Error ? error.message.slice(0, 220) : "unknown error",
+          supabase_error_message: error instanceof Error ? error.message : "unknown error",
+          status_code: statusCode,
+          troubleshooting:
+            "Kontrollera att objektet finns i bucketen, att media_path matchar exakt, och att SUPABASE_SERVICE_ROLE_KEY tillhor samma projekt som SUPABASE_URL.",
         });
-      }
-
-      if (!imageUrl && supabasePublicBaseUrl) {
-        imageUrl = `${supabasePublicBaseUrl}/storage/v1/object/public/${REPORT_MEDIA_BUCKET}/${mediaPath}`;
       }
 
       if (!imageUrl) {
         console.warn(`[${requestId}] No image URL available for email`, {
+          bucket: REPORT_MEDIA_BUCKET,
           media_path: mediaPath,
-          has_supabase_url: Boolean(supabasePublicBaseUrl),
+          troubleshooting:
+            "Signed URL saknas. Kontrollera tidigare loggrad 'Signed URL generation failed' for exakt Supabase-fel.",
         });
       }
     }
