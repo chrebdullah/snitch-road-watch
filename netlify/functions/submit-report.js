@@ -69,7 +69,7 @@ function resolveResendApiKey() {
 }
 
 const LAST_RESORT_NOTIFICATION_RECIPIENT = "snitchsweden@gmail.com";
-const REPORT_MEDIA_BUCKET = (readEnv("REPORT_MEDIA_BUCKET") ?? readEnv("VITE_REPORT_MEDIA_BUCKET") ?? "report-media").trim() || "report-media";
+const REPORT_MEDIA_BUCKET = (readEnv("VITE_REPORT_MEDIA_BUCKET") ?? "report-media").trim() || "report-media";
 
 function jsonResponse(statusCode, body) {
   return {
@@ -268,6 +268,7 @@ export const handler = async (event) => {
 
   const requestId = `submit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const supabaseUrl = readEnv("SUPABASE_URL") ?? readEnv("VITE_SUPABASE_URL");
+  const supabasePublicBaseUrl = readEnv("SUPABASE_URL");
   const supabaseKey =
     readEnv("SUPABASE_SERVICE_ROLE_KEY") ??
     readEnv("SUPABASE_ANON_KEY") ??
@@ -347,23 +348,42 @@ export const handler = async (event) => {
       });
     }
 
-    let mediaSignedUrl = null;
+    let imageUrl = null;
     if (mediaPath) {
       try {
-        const { data: signedUrlData } = await supabase.storage
+        const { data: signedUrlData, error: signedUrlError } = await supabase.storage
           .from(REPORT_MEDIA_BUCKET)
-          .createSignedUrl(mediaPath, 60 * 60 * 24 * 7);
-        mediaSignedUrl = signedUrlData?.signedUrl ?? null;
-        console.info(`[${requestId}] Signed URL generation result`, {
+          .createSignedUrl(mediaPath, 3600);
+
+        if (signedUrlError || !signedUrlData?.signedUrl) {
+          console.warn(`[${requestId}] Signed URL generation failed`, {
+            bucket: REPORT_MEDIA_BUCKET,
+            media_path: mediaPath,
+            reason: signedUrlError?.message?.slice(0, 220) ?? "missing signedUrl in response",
+          });
+        } else {
+          imageUrl = signedUrlData.signedUrl;
+          console.info(`[${requestId}] Signed URL generation succeeded`, {
+            bucket: REPORT_MEDIA_BUCKET,
+            media_path: mediaPath,
+          });
+        }
+      } catch (error) {
+        console.warn(`[${requestId}] Signed URL generation failed`, {
           bucket: REPORT_MEDIA_BUCKET,
           media_path: mediaPath,
-          signed_url_created: Boolean(mediaSignedUrl),
+          reason: error instanceof Error ? error.message.slice(0, 220) : "unknown error",
         });
-      } catch {
-        mediaSignedUrl = null;
-        console.warn(`[${requestId}] Signed URL generation threw`, {
-          bucket: REPORT_MEDIA_BUCKET,
+      }
+
+      if (!imageUrl && supabasePublicBaseUrl) {
+        imageUrl = `${supabasePublicBaseUrl}/storage/v1/object/public/${REPORT_MEDIA_BUCKET}/${mediaPath}`;
+      }
+
+      if (!imageUrl) {
+        console.warn(`[${requestId}] No image URL available for email`, {
           media_path: mediaPath,
+          has_supabase_url: Boolean(supabasePublicBaseUrl),
         });
       }
     }
@@ -414,15 +434,15 @@ export const handler = async (event) => {
         primary_recipient: primaryRecipient,
         hardcoded_fallback_used: usedHardcodedFallback,
       });
-      const mediaSection = mediaSignedUrl
-        ? `<p><strong>Bild:</strong> <a href="${escapeHtml(mediaSignedUrl)}">Öppna bilaga</a></p>`
+      const mediaSection = imageUrl
+        ? `<p><strong>Bild:</strong> <a href="${escapeHtml(imageUrl)}">Öppna bilaga</a></p>`
         : mediaPath
-        ? `<p><strong>Bild:</strong> ${escapeHtml(mediaPath)}</p>`
+        ? `<p><strong>Bild:</strong> Ingen giltig bild-URL kunde skapas</p>`
         : "<p><strong>Bild:</strong> Ingen</p>";
       console.info(`[${requestId}] email rendering of image field`, {
         media_path: mediaPath,
-        media_signed_url: mediaSignedUrl,
-        rendered_value: mediaSignedUrl ? "signed_url" : mediaPath ? "storage_path" : "none",
+        image_url: imageUrl,
+        rendered_value: imageUrl ? "image_url" : mediaPath ? "missing_url" : "none",
       });
       if (uniqueRecipients.length === 0) {
         emailError = "Inga giltiga email-mottagare konfigurerade.";
