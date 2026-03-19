@@ -69,14 +69,130 @@ function resolveResendApiKey() {
 }
 
 const LAST_RESORT_NOTIFICATION_RECIPIENT = "snitchsweden@gmail.com";
-const REPORT_MEDIA_BUCKET =
-  (readEnv("REPORT_MEDIA_BUCKET") ?? readEnv("VITE_REPORT_MEDIA_BUCKET") ?? "report-media").trim() || "report-media";
+const REPORT_MEDIA_BUCKET = (process.env.VITE_REPORT_MEDIA_BUCKET || "report-media").trim() || "report-media";
 
 function jsonResponse(statusCode, body) {
   return {
     statusCode,
     headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  };
+}
+
+function readHeader(event, headerName) {
+  const headers = event?.headers || {};
+  const direct = headers[headerName];
+  if (typeof direct === "string" && direct.trim().length > 0) return direct.trim();
+  const lower = headers[headerName.toLowerCase()];
+  if (typeof lower === "string" && lower.trim().length > 0) return lower.trim();
+  return null;
+}
+
+function parseOptionalNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readFormString(form, key) {
+  const value = form.get(key);
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeImageExtension(fileName, mimeType) {
+  const fromName = fileName?.split(".").pop()?.toLowerCase() || "";
+  const sanitizedFromName = fromName.replace(/[^a-z0-9]/g, "");
+  if (sanitizedFromName) return sanitizedFromName;
+
+  const mimeToExt = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/heic": "heic",
+    "image/heif": "heif",
+    "image/avif": "avif",
+    "image/bmp": "bmp",
+    "image/tiff": "tiff",
+    "image/svg+xml": "svg",
+  };
+
+  return mimeToExt[mimeType?.toLowerCase?.() || ""] || "jpg";
+}
+
+async function parseIncomingPayload(event) {
+  const contentType = readHeader(event, "content-type") || "";
+  const isMultipart = contentType.toLowerCase().includes("multipart/form-data");
+
+  if (!event.body) {
+    return {
+      reg_number: "",
+      address: null,
+      comment: null,
+      latitude: null,
+      longitude: null,
+      happened_at: null,
+      file: null,
+      file_name: null,
+      file_type: null,
+      file_size: null,
+    };
+  }
+
+  if (isMultipart) {
+    const bodyBuffer = event.isBase64Encoded ? Buffer.from(event.body, "base64") : Buffer.from(event.body, "binary");
+    const request = new Request("http://localhost/.netlify/functions/submit-report", {
+      method: "POST",
+      headers: { "content-type": contentType },
+      body: bodyBuffer,
+    });
+    const form = await request.formData();
+    const imageEntry = form.get("image");
+    const file = imageEntry && typeof imageEntry === "object" && "arrayBuffer" in imageEntry ? imageEntry : null;
+
+    const latRaw = readFormString(form, "lat") || readFormString(form, "latitude");
+    const lngRaw = readFormString(form, "lng") || readFormString(form, "longitude");
+    const happenedAtRaw = readFormString(form, "happened_at");
+    const regNumberRaw = readFormString(form, "reg_number");
+    const addressRaw = readFormString(form, "address");
+    const commentRaw = readFormString(form, "comment");
+
+    return {
+      reg_number: regNumberRaw.trim().toUpperCase(),
+      address: addressRaw.trim() || null,
+      comment: commentRaw.trim() || null,
+      latitude: parseOptionalNumber(latRaw),
+      longitude: parseOptionalNumber(lngRaw),
+      happened_at: happenedAtRaw.trim() || null,
+      file,
+      file_name: file?.name || null,
+      file_type: file?.type || null,
+      file_size: typeof file?.size === "number" ? file.size : null,
+    };
+  }
+
+  const payload = JSON.parse(event.body || "{}");
+  const regNumber = payload.reg_number?.trim().toUpperCase() ?? "";
+  const address = payload.address?.trim() || null;
+  const comment = payload.comment?.trim() || null;
+  const latitude = parseOptionalNumber(payload.latitude ?? payload.lat);
+  const longitude = parseOptionalNumber(payload.longitude ?? payload.lng);
+
+  return {
+    reg_number: regNumber,
+    address,
+    comment,
+    latitude,
+    longitude,
+    happened_at: typeof payload.happened_at === "string" ? payload.happened_at.trim() || null : null,
+    file: null,
+    file_name: null,
+    file_type: null,
+    file_size: null,
   };
 }
 
@@ -291,30 +407,17 @@ export const handler = async (event) => {
 
   let payload;
   try {
-    payload = JSON.parse(event.body || "{}");
+    payload = await parseIncomingPayload(event);
   } catch {
-    return jsonResponse(400, { error: "Felaktig JSON i request." });
+    return jsonResponse(400, { error: "Felaktigt formulärinnehåll i request." });
   }
 
-  const regNumber = payload.reg_number?.trim().toUpperCase() ?? "";
-  const address = payload.address?.trim() || null;
-  const comment = payload.comment?.trim() || null;
-  const latitude = typeof payload.latitude === "number" && Number.isFinite(payload.latitude) ? payload.latitude : null;
-  const longitude = typeof payload.longitude === "number" && Number.isFinite(payload.longitude) ? payload.longitude : null;
-  const mediaFieldCandidates = [
-    { key: "media_path", value: payload.media_path },
-    { key: "image_path", value: payload.image_path },
-    { key: "image_url", value: payload.image_url },
-    { key: "media_url", value: payload.media_url },
-  ];
-  const matchedMediaField = mediaFieldCandidates.find(
-    (entry) => typeof entry.value === "string" && entry.value.trim().length > 0
-  );
-  const mediaPath = matchedMediaField ? matchedMediaField.value.trim() : null;
-  console.info(`[${requestId}] backend received image field`, {
-    media_field: matchedMediaField?.key ?? null,
-    media_path: mediaPath,
-  });
+  const regNumber = payload.reg_number;
+  const address = payload.address;
+  const comment = payload.comment;
+  const latitude = payload.latitude;
+  const longitude = payload.longitude;
+  const happenedAt = payload.happened_at;
 
   if (!regNumber) {
     return jsonResponse(400, { error: "Registreringsnummer saknas." });
@@ -324,12 +427,72 @@ export const handler = async (event) => {
     return jsonResponse(400, { error: "Plats saknas. Tillåt GPS eller skriv adress." });
   }
 
-  const happenedOn = toDateOnlyIso(payload.happened_at);
+  const happenedOn = toDateOnlyIso(happenedAt);
   const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
   try {
+    let mediaPath = null;
+
+    if (payload.file) {
+      console.info(`[${requestId}] file received`, {
+        file_name: payload.file_name,
+        file_type: payload.file_type,
+        file_size: payload.file_size,
+      });
+      console.info(`[${requestId}] file metadata`, {
+        type: payload.file_type || "application/octet-stream",
+        size: payload.file_size ?? 0,
+      });
+
+      const extension = normalizeImageExtension(payload.file_name, payload.file_type);
+      mediaPath = `uploads/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+
+      try {
+        const fileArrayBuffer = await payload.file.arrayBuffer();
+        const fileBytes = new Uint8Array(fileArrayBuffer);
+        const { error: uploadError } = await supabase.storage.from(REPORT_MEDIA_BUCKET).upload(mediaPath, fileBytes, {
+          upsert: false,
+          contentType: payload.file_type || "application/octet-stream",
+        });
+
+        if (uploadError) {
+          console.error(`[${requestId}] upload failure`, {
+            bucket: REPORT_MEDIA_BUCKET,
+            media_path: mediaPath,
+            file_type: payload.file_type,
+            file_size: payload.file_size,
+            error: uploadError.message || "unknown upload error",
+            status_code: uploadError.statusCode ?? uploadError.status ?? null,
+          });
+          return jsonResponse(500, { error: "Bilduppladdning misslyckades i backend." });
+        }
+
+        console.info(`[${requestId}] upload success`, {
+          bucket: REPORT_MEDIA_BUCKET,
+          media_path: mediaPath,
+          file_type: payload.file_type,
+          file_size: payload.file_size,
+        });
+      } catch (uploadException) {
+        console.error(`[${requestId}] upload failure`, {
+          bucket: REPORT_MEDIA_BUCKET,
+          media_path: mediaPath,
+          file_type: payload.file_type,
+          file_size: payload.file_size,
+          error: uploadException instanceof Error ? uploadException.message : "unknown upload exception",
+        });
+        return jsonResponse(500, { error: "Bilduppladdning misslyckades i backend." });
+      }
+    } else {
+      console.info(`[${requestId}] file received`, {
+        file_name: null,
+        file_type: null,
+        file_size: 0,
+      });
+    }
+
     const { data: insertedReport, error: insertError, schema: insertSchema, fields: insertFields } = await insertReportWithSchemaFallback(supabase, {
       reg_number: regNumber,
       masked_reg: maskRegNumber(regNumber),
@@ -378,9 +541,29 @@ export const handler = async (event) => {
             troubleshooting:
               "Kontrollera att objektet finns i bucketen, att media_path matchar exakt, och att SUPABASE_SERVICE_ROLE_KEY tillhor samma projekt som SUPABASE_URL.",
           });
+          const { data: publicUrlData } = supabase.storage.from(REPORT_MEDIA_BUCKET).getPublicUrl(mediaPath);
+          if (publicUrlData?.publicUrl) {
+            imageUrl = publicUrlData.publicUrl;
+            console.info(`[${requestId}] signed URL result`, {
+              status: "fallback_public_url",
+              bucket: REPORT_MEDIA_BUCKET,
+              media_path: mediaPath,
+            });
+          } else {
+            console.warn(`[${requestId}] signed URL result`, {
+              status: "missing_signed_and_public_url",
+              bucket: REPORT_MEDIA_BUCKET,
+              media_path: mediaPath,
+            });
+          }
         } else {
           imageUrl = signedUrlData.signedUrl;
           console.info(`[${requestId}] Signed URL generation succeeded`, {
+            bucket: REPORT_MEDIA_BUCKET,
+            media_path: mediaPath,
+          });
+          console.info(`[${requestId}] signed URL result`, {
+            status: "signed_url_success",
             bucket: REPORT_MEDIA_BUCKET,
             media_path: mediaPath,
           });
@@ -400,6 +583,21 @@ export const handler = async (event) => {
           troubleshooting:
             "Kontrollera att objektet finns i bucketen, att media_path matchar exakt, och att SUPABASE_SERVICE_ROLE_KEY tillhor samma projekt som SUPABASE_URL.",
         });
+        const { data: publicUrlData } = supabase.storage.from(REPORT_MEDIA_BUCKET).getPublicUrl(mediaPath);
+        if (publicUrlData?.publicUrl) {
+          imageUrl = publicUrlData.publicUrl;
+          console.info(`[${requestId}] signed URL result`, {
+            status: "fallback_public_url_after_exception",
+            bucket: REPORT_MEDIA_BUCKET,
+            media_path: mediaPath,
+          });
+        } else {
+          console.warn(`[${requestId}] signed URL result`, {
+            status: "signed_url_exception_no_public_url",
+            bucket: REPORT_MEDIA_BUCKET,
+            media_path: mediaPath,
+          });
+        }
       }
 
       if (!imageUrl) {
@@ -438,7 +636,7 @@ export const handler = async (event) => {
           longitude,
           location_text: locationText,
           comment,
-          happened_at: payload.happened_at ?? null,
+          happened_at: happenedAt,
           media_path: mediaPath,
         });
         backupSaved = true;
@@ -478,7 +676,7 @@ export const handler = async (event) => {
           const html = `<h2>Ny rapport</h2>
                 <p><strong>Regnr:</strong> ${escapeHtml(regNumber)}</p>
                 <p><strong>Plats:</strong> ${escapeHtml(locationText)}</p>
-                <p><strong>Tid:</strong> ${escapeHtml(payload.happened_at || "just nu")}</p>
+                <p><strong>Tid:</strong> ${escapeHtml(happenedAt || "just nu")}</p>
                 <p><strong>Kommentar:</strong> ${escapeHtml(comment || "-")}</p>
                 ${mediaSection}
                 <p><strong>Rapport-ID:</strong> ${escapeHtml(insertedReport?.id || "okand")}</p>`;
