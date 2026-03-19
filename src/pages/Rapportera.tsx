@@ -1,149 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
 import { Camera, MapPin, Upload, CheckCircle, Smartphone, AlertCircle, X } from "lucide-react";
 
 type Status = "idle" | "uploading" | "success" | "error";
 const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
-const STORAGE_BUCKET = (import.meta.env.VITE_REPORT_MEDIA_BUCKET ?? "report-media").trim() || "report-media";
 
 const SWISH_DEEP_LINK =
   "swish://payment?data=%7B%22version%22%3A1%2C%22payee%22%3A%7B%22value%22%3A%220729626225%22%2C%22editable%22%3Afalse%7D%2C%22amount%22%3A%7B%22value%22%3A50%2C%22editable%22%3Atrue%7D%2C%22message%22%3A%7B%22value%22%3A%22Stod%20SNITCH%22%2C%22editable%22%3Atrue%7D%7D";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-type UploadFailureKind = "bucket_missing" | "permission_denied" | "network" | "unknown";
-
-type SupabaseStorageErrorInfo = {
-  message: string;
-  statusCode: number | null;
-  errorCode: string | null;
-};
-
-function readSupabaseStorageError(error: unknown): SupabaseStorageErrorInfo {
-  if (!error || typeof error !== "object") {
-    return {
-      message: typeof error === "string" ? error : "Okänt upload-fel.",
-      statusCode: null,
-      errorCode: null,
-    };
-  }
-
-  const candidate = error as Record<string, unknown>;
-  const message = typeof candidate.message === "string" ? candidate.message : "Okänt upload-fel.";
-  const rawStatusCode = candidate.statusCode;
-  const statusCode =
-    typeof rawStatusCode === "number"
-      ? rawStatusCode
-      : typeof rawStatusCode === "string" && Number.isFinite(Number(rawStatusCode))
-        ? Number(rawStatusCode)
-        : null;
-
-  const errorCode =
-    typeof candidate.error === "string"
-      ? candidate.error
-      : typeof candidate.code === "string"
-        ? candidate.code
-        : null;
-
-  return { message, statusCode, errorCode };
-}
-
-function isNetworkError(message: string): boolean {
-  return /failed to fetch|fetch failed|network|load failed|networkerror/i.test(message);
-}
-
-function classifyUploadFailure(error: unknown): {
-  kind: UploadFailureKind;
-  userMessage: string;
-  details: SupabaseStorageErrorInfo;
-} {
-  const details = readSupabaseStorageError(error);
-  if (
-    details.statusCode === 404 ||
-    /bucket.+not found|does not exist|invalid bucket/i.test(details.message)
-  ) {
-    return {
-      kind: "bucket_missing",
-      userMessage: `Bilduppladdning är inte korrekt konfigurerad. Bucketen "${STORAGE_BUCKET}" saknas i Supabase Storage.`,
-      details,
-    };
-  }
-
-  if (details.statusCode === 401 || details.statusCode === 403) {
-    return {
-      kind: "permission_denied",
-      userMessage: "Bilduppladdning nekades av Supabase Storage (saknad behörighet eller policy).",
-      details,
-    };
-  }
-
-  if (isNetworkError(details.message)) {
-    return {
-      kind: "network",
-      userMessage: "Nätverksfel vid bilduppladdning. Kontrollera anslutningen och försök igen.",
-      details,
-    };
-  }
-
-  return {
-    kind: "unknown",
-    userMessage: "Okänt fel vid bilduppladdning. Försök igen.",
-    details,
-  };
-}
-
-function maskRegNumber(regNumber: string): string {
-  const clean = regNumber.replace(/\s+/g, "").toUpperCase();
-  if (clean.length <= 3) return "***";
-  if (clean.length <= 5) return `${clean.slice(0, 1)}***${clean.slice(-1)}`;
-  return `${clean.slice(0, 2)}***${clean.slice(-2)}`;
-}
-
-function toDateOnlyIso(value: string | null): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().split("T")[0] ?? null;
-}
-
-function extractMissingColumn(error: unknown): string | null {
-  if (!error || typeof error !== "object" || !("message" in error)) return null;
-  const message = typeof error.message === "string" ? error.message : "";
-  const match = message.match(/Could not find the '([^']+)' column/i);
-  return match?.[1] ?? null;
-}
-
-async function insertAdaptiveReport(candidate: Record<string, unknown>) {
-  const record = { ...candidate };
-  let lastError: unknown = null;
-
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const result = await supabase
-      .from("reports")
-      .insert(record as never)
-      .select("id")
-      .single();
-
-    if (!result.error) {
-      return { id: result.data?.id ?? null, error: null };
-    }
-
-    lastError = result.error;
-    const missingColumn = extractMissingColumn(result.error);
-    if (missingColumn && Object.prototype.hasOwnProperty.call(record, missingColumn)) {
-      delete record[missingColumn];
-      continue;
-    }
-
-    break;
-  }
-
-  return { id: null, error: lastError };
-}
 
 export default function Rapportera() {
   const [regNumber, setRegNumber] = useState("");
@@ -151,8 +14,6 @@ export default function Rapportera() {
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
-  const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
-  const [isImageUploadInProgress, setIsImageUploadInProgress] = useState(false);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState("");
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
@@ -200,7 +61,6 @@ export default function Rapportera() {
       setFile(null);
       setFilePreview(null);
       setPreviewFailed(false);
-      setUploadedImagePath(null);
       e.target.value = "";
       return;
     }
@@ -210,7 +70,6 @@ export default function Rapportera() {
       setFile(null);
       setFilePreview(null);
       setPreviewFailed(false);
-      setUploadedImagePath(null);
       e.target.value = "";
       return;
     }
@@ -223,14 +82,12 @@ export default function Rapportera() {
       setFile(selected);
       setFilePreview(nextPreview);
       setPreviewFailed(false);
-      setUploadedImagePath(null);
       setErrorMsg("");
     } catch (error) {
       console.error("Kunde inte skapa bildförhandsvisning:", error);
       setFile(null);
       setFilePreview(null);
       setPreviewFailed(false);
-      setUploadedImagePath(null);
       setErrorMsg("Kunde inte läsa bilden. Försök med en annan bild.");
       e.target.value = "";
     }
@@ -243,7 +100,6 @@ export default function Rapportera() {
     setFile(null);
     setFilePreview(null);
     setPreviewFailed(false);
-    setUploadedImagePath(null);
     if (imageInputRef.current) imageInputRef.current.value = "";
   };
 
@@ -276,11 +132,6 @@ export default function Rapportera() {
       return;
     }
 
-    if (isImageUploadInProgress) {
-      setErrorMsg("Bilduppladdning pågår fortfarande. Vänta tills den är klar.");
-      return;
-    }
-
     setStatus("uploading");
     setErrorMsg("");
 
@@ -291,152 +142,39 @@ export default function Rapportera() {
       }
 
       const cleanedReg = regNumber.trim().toUpperCase();
-      const happenedOn = toDateOnlyIso(!happenedNow && happenedAt ? happenedAt : null);
-      let mediaPath: string | null = uploadedImagePath;
-
-      if (file && !mediaPath) {
-        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-        const safeExt = ext.replace(/[^a-z0-9]/g, "") || "jpg";
-        const fileName = `${Date.now()}-${crypto.randomUUID()}.${safeExt}`;
-        mediaPath = `uploads/${fileName}`;
-
-        setIsImageUploadInProgress(true);
-        console.info("[Rapportera] upload start", {
-          bucket: STORAGE_BUCKET,
-          media_path: mediaPath,
-          file_name: file.name,
-          file_size: file.size,
-          mime_type: file.type,
-        });
-
-        try {
-          const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(mediaPath, file, {
-            upsert: false,
-            contentType: file.type,
-          });
-
-          if (uploadError) {
-            const classified = classifyUploadFailure(uploadError);
-            console.error("Supabase storage upload failed", {
-              kind: classified.kind,
-              rawError: uploadError,
-              supabaseErrorMessage: classified.details.message,
-              statusCode: classified.details.statusCode,
-              errorCode: classified.details.errorCode,
-              bucketName: STORAGE_BUCKET,
-              filePath: mediaPath,
-              fileSize: file.size,
-              mimeType: file.type,
-            });
-            throw new Error(classified.userMessage);
-          }
-
-          console.info("[Rapportera] upload success", {
-            bucket: STORAGE_BUCKET,
-            media_path: mediaPath,
-          });
-          setUploadedImagePath(mediaPath);
-          console.info("[Rapportera] state updated with image path", {
-            uploaded_image_path: mediaPath,
-          });
-        } finally {
-          setIsImageUploadInProgress(false);
-        }
+      const happenedAtIso = !happenedNow && happenedAt ? new Date(happenedAt).toISOString() : "";
+      const formData = new FormData();
+      formData.append("reg_number", cleanedReg);
+      formData.append("comment", comment.trim());
+      formData.append("lat", location?.lat?.toString() ?? "");
+      formData.append("lng", location?.lng?.toString() ?? "");
+      formData.append("address", address.trim());
+      formData.append("happened_at", happenedAtIso);
+      if (file) {
+        formData.append("image", file);
       }
 
-      const requestPayload = {
-        reg_number: cleanedReg,
-        latitude: location?.lat ?? null,
-        longitude: location?.lng ?? null,
-        address: address.trim() || null,
-        comment: comment.trim() || null,
-        happened_at: !happenedNow && happenedAt ? new Date(happenedAt).toISOString() : null,
-        media_path: mediaPath,
-      };
-
-      console.info("[Rapportera] payload sent with image field", {
-        media_path: requestPayload.media_path,
+      const submitReportEndpoint = new URL("/.netlify/functions/submit-report", window.location.origin).toString();
+      const response = await fetch(submitReportEndpoint, {
+        method: "POST",
+        body: formData,
       });
 
-      const saveReportDirectly = async () => {
-        const attempts: Array<Record<string, unknown>> = [
-          {
-            reg_number: cleanedReg,
-            masked_reg: maskRegNumber(cleanedReg),
-            latitude: location?.lat ?? null,
-            longitude: location?.lng ?? null,
-            address: address.trim() || null,
-            comment: comment.trim() || null,
-            happened_on: happenedOn,
-            media_url: mediaPath,
-            approved: true,
-            source: "web",
-          },
-          {
-            reg_number: cleanedReg,
-            masked_reg: maskRegNumber(cleanedReg),
-            lat: location?.lat ?? null,
-            lng: location?.lng ?? null,
-            address: address.trim() || null,
-            comment: comment.trim() || null,
-            happened_on: happenedOn,
-            image_url: mediaPath,
-            approved: true,
-            source: "web",
-          },
-          {
-            reg_number: cleanedReg,
-            masked_reg: maskRegNumber(cleanedReg),
-            approved: true,
-          },
-        ];
-
-        for (const candidate of attempts) {
-          const { id, error } = await insertAdaptiveReport(candidate);
-          if (!error) {
-            return id;
-          }
-        }
-
-        throw new Error("Kunde inte spara rapporten. Försök igen om en stund.");
-      };
-
+      const rawText = await response.text();
       let payload: Record<string, unknown> = {};
-      const submitReportEndpoint = new URL("/.netlify/functions/submit-report", window.location.origin).toString();
-
       try {
-        const response = await fetch(submitReportEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestPayload),
-        });
-
-        const rawText = await response.text();
-
-        try {
-          payload = rawText ? JSON.parse(rawText) : {};
-        } catch {
-          payload = {};
-        }
-
-        if (!response.ok) {
-          const fallback = rawText.trim().slice(0, 120);
-          const message =
-            typeof payload?.error === "string"
-              ? payload.error
-              : fallback || "Något gick fel vid inskick.";
-          throw new Error(message);
-        }
+        payload = rawText ? JSON.parse(rawText) : {};
       } catch {
-        if (import.meta.env.DEV) {
-          await saveReportDirectly();
-          setStatus("success");
-          return;
-        }
+        payload = {};
+      }
 
-        throw new Error(
-          "Kunde inte nå rapportfunktionen i produktion. Rapporten sparades inte lokalt för att undvika tappad e-postnotis."
-        );
+      if (!response.ok) {
+        const fallback = rawText.trim().slice(0, 120);
+        const message =
+          typeof payload?.error === "string"
+            ? payload.error
+            : fallback || "Något gick fel vid inskick.";
+        throw new Error(message);
       }
 
       setStatus("success");
@@ -473,7 +211,6 @@ export default function Rapportera() {
               setStatus("idle");
               setFile(null);
               setFilePreview(null);
-              setUploadedImagePath(null);
               setComment("");
               setRegNumber("");
               setHappenedNow(true);
@@ -686,7 +423,7 @@ export default function Rapportera() {
 
           <button
             type="submit"
-            disabled={status === "uploading" || isImageUploadInProgress}
+            disabled={status === "uploading"}
             className="w-full py-4 min-h-[56px] bg-accent-brand text-accent-brand-foreground font-bold text-lg rounded-full hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50"
           >
             {status === "uploading" ? "Skickar..." : "SKICKA RAPPORT"}
