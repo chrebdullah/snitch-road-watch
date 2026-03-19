@@ -6,9 +6,16 @@ type Incident = {
   id: string;
   created_at: string;
   masked_reg: string;
-  city: string | null;
+  location_label: string;
   latitude: number | null;
   longitude: number | null;
+};
+
+type DashboardStatsResponse = {
+  total_reports: number;
+  last_24h_reports: number;
+  unique_locations: number;
+  latest_incidents: Incident[];
 };
 
 function formatDate(dateStr: string): string {
@@ -20,41 +27,28 @@ function formatDate(dateStr: string): string {
 }
 
 export default function StatsSection() {
-  const [totalReports, setTotalReports] = useState(21);
+  const [totalReports, setTotalReports] = useState(0);
   const [last24h, setLast24h] = useState(0);
   const [uniqueCities, setUniqueCities] = useState(0);
   const [latestIncidents, setLatestIncidents] = useState<Incident[]>([]);
 
   const fetchStats = async () => {
-    // Total
-    const { count: total } = await supabase
-      .from("reports_public")
-      .select("id", { count: "exact", head: true });
-    setTotalReports(Math.max(total ?? 0, 21));
+    try {
+      const endpoint = new URL("/.netlify/functions/dashboard-stats", window.location.origin).toString();
+      const response = await fetch(endpoint, { method: "GET" });
+      const payload = (await response.json()) as DashboardStatsResponse;
 
-    // Last 24h
-    const yesterday = new Date(Date.now() - 86400000).toISOString();
-    const { count: recent } = await supabase
-      .from("reports_public")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", yesterday);
-    setLast24h(recent ?? 0);
+      if (!response.ok) {
+        throw new Error("Kunde inte hämta dashboard-statistik.");
+      }
 
-    // Unique cities
-    const { data: cityData } = await supabase
-      .from("reports_public")
-      .select("city")
-      .not("city", "is", null);
-    const cities = new Set((cityData || []).map((r: any) => r.city).filter(Boolean));
-    setUniqueCities(cities.size);
-
-    // Latest incidents for clickable list under statistics
-    const { data: latestData } = await supabase
-      .from("reports_public")
-      .select("id, created_at, masked_reg, city, latitude, longitude")
-      .order("created_at", { ascending: false })
-      .limit(8);
-    setLatestIncidents((latestData as Incident[]) ?? []);
+      setTotalReports(payload.total_reports ?? 0);
+      setLast24h(payload.last_24h_reports ?? 0);
+      setUniqueCities(payload.unique_locations ?? 0);
+      setLatestIncidents(Array.isArray(payload.latest_incidents) ? payload.latest_incidents : []);
+    } catch (error) {
+      console.error("StatsSection: dashboard-statistik misslyckades", error);
+    }
   };
 
   useEffect(() => {
@@ -120,7 +114,7 @@ export default function StatsSection() {
                     {incident.masked_reg || "***"}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {incident.city || "Okänd ort"} · {formatDate(incident.created_at)}
+                    {incident.location_label || "Okänd plats"} · {formatDate(incident.created_at)}
                   </p>
                 </div>
                 <ExternalLink size={14} className="text-muted-foreground shrink-0" />
