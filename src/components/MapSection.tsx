@@ -21,7 +21,9 @@ type HeatmapReportRow = {
 type HeatmapDebug = {
   activePeriod: TimeFilter;
   fetchedRows: number;
-  rowsInSelectedPeriod: number;
+  totalRowsInSelectedPeriod: number;
+  rowsInSelectedPeriodWithCoordinates: number;
+  rowsInSelectedPeriodWithoutCoordinates: number;
   rowsWithValidCoordinates: number;
   renderedHeatPoints: number;
   first3RawRows: HeatmapReportRow[];
@@ -29,13 +31,19 @@ type HeatmapDebug = {
   coordinateSourceInRuntime: string[];
   dataSource: string;
   timeField: string;
+  nowInStockholm: string;
+  startOfDayInStockholm: string;
+  utcBoundaryUsedInFilter: string;
+  latestReportCreatedAt: string;
+  latestReportInclusion: string;
+  latestReportInclusionReason: string;
+  coordinateGapExplanation: string;
 };
 
-const stockholmDayFormatter = new Intl.DateTimeFormat("sv-SE", {
+const stockholmDateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
   timeZone: STOCKHOLM_TIMEZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
+  dateStyle: "short",
+  timeStyle: "medium",
 });
 
 function toFiniteNumber(value: unknown): number | null {
@@ -47,23 +55,161 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function getStockholmDayKey(value: Date): string {
-  return stockholmDayFormatter.format(value);
+function formatInStockholm(value: Date): string {
+  return stockholmDateTimeFormatter.format(value);
 }
 
-function isRowInSelectedPeriod(createdAt: string, period: TimeFilter): boolean {
-  const rowDate = new Date(createdAt);
-  if (Number.isNaN(rowDate.getTime())) return false;
+function getDatePartsInTimeZone(value: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(value);
 
-  if (period === "all") return true;
+  const lookup = new Map(parts.map((part) => [part.type, part.value]));
+  return {
+    year: Number(lookup.get("year")),
+    month: Number(lookup.get("month")),
+    day: Number(lookup.get("day")),
+    hour: Number(lookup.get("hour")),
+    minute: Number(lookup.get("minute")),
+    second: Number(lookup.get("second")),
+  };
+}
 
-  if (period === "today") {
-    return getStockholmDayKey(rowDate) === getStockholmDayKey(new Date());
+function getTimeZoneOffsetMs(value: Date, timeZone: string): number {
+  const parts = getDatePartsInTimeZone(value, timeZone);
+  const utcFromZoneParts = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return utcFromZoneParts - value.getTime();
+}
+
+function getStartOfStockholmDayUtcMs(reference: Date): number {
+  const stockholmParts = getDatePartsInTimeZone(reference, STOCKHOLM_TIMEZONE);
+  const utcGuess = Date.UTC(stockholmParts.year, stockholmParts.month - 1, stockholmParts.day, 0, 0, 0);
+  const offsetAtGuess = getTimeZoneOffsetMs(new Date(utcGuess), STOCKHOLM_TIMEZONE);
+  return utcGuess - offsetAtGuess;
+}
+
+type PeriodEvaluation = {
+  included: boolean;
+  reason: string;
+};
+
+type PeriodEvaluator = {
+  nowInStockholm: string;
+  startOfDayInStockholm: string;
+  utcBoundaryUsedInFilter: string;
+  evaluate: (createdAt: string | null | undefined) => PeriodEvaluation;
+};
+
+function createPeriodEvaluator(period: TimeFilter, now = new Date()): PeriodEvaluator {
+  const nowMs = now.getTime();
+  const nowInStockholm = formatInStockholm(now);
+  const startOfTodayUtcMs = getStartOfStockholmDayUtcMs(now);
+  const startOfDayInStockholm = formatInStockholm(new Date(startOfTodayUtcMs));
+
+  const weekBoundaryMs = nowMs - 7 * 86400000;
+  const monthBoundaryMs = nowMs - 30 * 86400000;
+
+  let boundaryMs: number | null = null;
+  if (period === "today") boundaryMs = startOfTodayUtcMs;
+  if (period === "week") boundaryMs = weekBoundaryMs;
+  if (period === "month") boundaryMs = monthBoundaryMs;
+
+  const utcBoundaryUsedInFilter = boundaryMs === null ? "none (all time)" : new Date(boundaryMs).toISOString();
+
+  return {
+    nowInStockholm,
+    startOfDayInStockholm,
+    utcBoundaryUsedInFilter,
+    evaluate(createdAt) {
+      if (!createdAt || typeof createdAt !== "string") {
+        return {
+          included: false,
+          reason: "excluded: missing created_at",
+        };
+      }
+
+      const rowDate = new Date(createdAt);
+      const rowMs = rowDate.getTime();
+      if (Number.isNaN(rowMs)) {
+        return {
+          included: false,
+          reason: "excluded: invalid created_at format",
+        };
+      }
+
+      if (period === "all") {
+        return {
+          included: true,
+          reason: "included: all period",
+        };
+      }
+
+      const inWindow = boundaryMs !== null ? rowMs >= boundaryMs && rowMs <= nowMs : rowMs <= nowMs;
+      return {
+        included: inWindow,
+        reason: inWindow
+          ? `included: ${createdAt} >= ${utcBoundaryUsedInFilter}`
+          : `excluded: ${createdAt} < ${utcBoundaryUsedInFilter}`,
+      };
+    },
+  };
+}
+
+function resolveCoordinates(row: HeatmapReportRow) {
+  const hasLatitudeLongitude =
+    toFiniteNumber(row.latitude) !== null && toFiniteNumber(row.longitude) !== null;
+  const hasLatLng = toFiniteNumber(row.lat) !== null && toFiniteNumber(row.lng) !== null;
+  const lat = toFiniteNumber(row.latitude ?? row.lat);
+  const lng = toFiniteNumber(row.longitude ?? row.lng);
+
+  return {
+    hasLatitudeLongitude,
+    hasLatLng,
+    lat,
+    lng,
+  };
+}
+
+function hasValidCoordinates(row: HeatmapReportRow): boolean {
+  const { lat, lng } = resolveCoordinates(row);
+  return lat !== null && lng !== null;
+}
+
+function analyzeMissingCoordinateRows(rows: HeatmapReportRow[]): {
+  rowsWithoutCoordinates: number;
+  explanation: string;
+} {
+  if (rows.length === 0) {
+    return { rowsWithoutCoordinates: 0, explanation: "Ingen data i vald period." };
   }
 
-  const nowMs = Date.now();
-  const days = period === "week" ? 7 : 30;
-  return rowDate.getTime() >= nowMs - days * 86400000;
+  const withoutCoordinates = rows.filter((row) => !hasValidCoordinates(row));
+
+  if (withoutCoordinates.length === 0) {
+    return { rowsWithoutCoordinates: 0, explanation: "Alla rapporter i vald period har platsdata." };
+  }
+
+  const recentBoundary = Date.now() - 7 * 86400000;
+  const missingRowsWithValidDate = withoutCoordinates
+    .map((row) => (typeof row.created_at === "string" ? new Date(row.created_at).getTime() : NaN))
+    .filter((time) => Number.isFinite(time));
+  const hasRecentMissing = missingRowsWithValidDate.some((time) => time >= recentBoundary);
+
+  const explanation = hasRecentMissing
+    ? "Rapporter utan lat/lng finns även nyligen. Det tyder på flöden där plats sparats utan GPS-koordinater (t.ex. manuell adress eller äldre/importerade format)."
+    : "Rapporter utan lat/lng ser ut att vara äldre data i jämförelse med nya rapporter med koordinater.";
+
+  return {
+    rowsWithoutCoordinates: withoutCoordinates.length,
+    explanation,
+  };
 }
 
 function mapRowsToPoints(rows: HeatmapReportRow[]): {
@@ -76,12 +222,7 @@ function mapRowsToPoints(rows: HeatmapReportRow[]): {
   const coordinateSourceInRuntime = new Set<string>();
 
   for (const row of rows) {
-    const hasLatitudeLongitude =
-      toFiniteNumber(row.latitude) !== null && toFiniteNumber(row.longitude) !== null;
-    const hasLatLng = toFiniteNumber(row.lat) !== null && toFiniteNumber(row.lng) !== null;
-    const lat = toFiniteNumber(row.latitude ?? row.lat);
-    const lng = toFiniteNumber(row.longitude ?? row.lng);
-
+    const { lat, lng, hasLatitudeLongitude, hasLatLng } = resolveCoordinates(row);
     if (lat === null || lng === null) continue;
 
     points.push([lat, lng]);
@@ -130,13 +271,14 @@ function UserLocation() {
 }
 
 export default function MapSection() {
-  const [count, setCount] = useState(0);
   const [filter, setFilter] = useState<TimeFilter>("all");
   const [livePoints, setLivePoints] = useState<[number, number][]>([]);
   const [debug, setDebug] = useState<HeatmapDebug>({
     activePeriod: "all",
     fetchedRows: 0,
-    rowsInSelectedPeriod: 0,
+    totalRowsInSelectedPeriod: 0,
+    rowsInSelectedPeriodWithCoordinates: 0,
+    rowsInSelectedPeriodWithoutCoordinates: 0,
     rowsWithValidCoordinates: 0,
     renderedHeatPoints: 0,
     first3RawRows: [],
@@ -144,6 +286,13 @@ export default function MapSection() {
     coordinateSourceInRuntime: [],
     dataSource: "public.reports",
     timeField: "created_at",
+    nowInStockholm: "",
+    startOfDayInStockholm: "",
+    utcBoundaryUsedInFilter: "",
+    latestReportCreatedAt: "",
+    latestReportInclusion: "",
+    latestReportInclusionReason: "",
+    coordinateGapExplanation: "",
   });
   const filterRef = useRef<TimeFilter>(filter);
   const latestRequestRef = useRef(0);
@@ -182,24 +331,35 @@ export default function MapSection() {
     }
 
     const fetchedRows = Array.isArray(payload.rows) ? payload.rows : [];
-    const rowsInSelectedPeriod = fetchedRows.filter((row) => {
-      if (!row.created_at || typeof row.created_at !== "string") return false;
-      return isRowInSelectedPeriod(row.created_at, period);
-    });
+    const periodEvaluator = createPeriodEvaluator(period, new Date());
+    const rowsWithEvaluation = fetchedRows.map((row) => ({
+      row,
+      evaluation: periodEvaluator.evaluate(row.created_at),
+    }));
+    const rowsInSelectedPeriod = rowsWithEvaluation
+      .filter((item) => item.evaluation.included)
+      .map((item) => item.row);
+
     const mapped = mapRowsToPoints(rowsInSelectedPeriod);
     const transformed = mapped.points.slice(0, 3).map(([lat, lng]) => ({ lat, lng }));
+    const missingCoordinateAnalysis = analyzeMissingCoordinateRows(rowsInSelectedPeriod);
+    const latestReportRow = fetchedRows.find((row) => typeof row.created_at === "string") ?? null;
+    const latestReportEvaluation = periodEvaluator.evaluate(latestReportRow?.created_at);
+    const latestReportCreatedAt = latestReportRow?.created_at || "missing created_at";
+    const latestReportInclusion = latestReportEvaluation.included ? "included" : "excluded";
 
     if (requestId !== latestRequestRef.current) {
       console.info("[Heatmap] Ignored stale response", { period, requestId });
       return;
     }
 
-    setCount(mapped.points.length);
     setLivePoints(mapped.points);
     setDebug({
       activePeriod: period,
       fetchedRows: fetchedRows.length,
-      rowsInSelectedPeriod: rowsInSelectedPeriod.length,
+      totalRowsInSelectedPeriod: rowsInSelectedPeriod.length,
+      rowsInSelectedPeriodWithCoordinates: mapped.validCoordinateReports,
+      rowsInSelectedPeriodWithoutCoordinates: missingCoordinateAnalysis.rowsWithoutCoordinates,
       rowsWithValidCoordinates: mapped.validCoordinateReports,
       renderedHeatPoints: mapped.points.length,
       first3RawRows: rowsInSelectedPeriod.slice(0, 3),
@@ -207,18 +367,37 @@ export default function MapSection() {
       coordinateSourceInRuntime: mapped.coordinateSourceInRuntime,
       dataSource: payload.data_source || "public.reports",
       timeField: payload.time_field || "created_at",
+      nowInStockholm: periodEvaluator.nowInStockholm,
+      startOfDayInStockholm: periodEvaluator.startOfDayInStockholm,
+      utcBoundaryUsedInFilter: periodEvaluator.utcBoundaryUsedInFilter,
+      latestReportCreatedAt,
+      latestReportInclusion,
+      latestReportInclusionReason: latestReportEvaluation.reason,
+      coordinateGapExplanation: missingCoordinateAnalysis.explanation,
+    });
+
+    console.info("[Heatmap Time Debug]", {
+      "now in Europe/Stockholm": periodEvaluator.nowInStockholm,
+      "start of day in Europe/Stockholm": periodEvaluator.startOfDayInStockholm,
+      "UTC boundary used in query/filter": periodEvaluator.utcBoundaryUsedInFilter,
+      "created_at for latest report": latestReportCreatedAt,
+      "whether latest report is included or excluded": latestReportInclusion,
+      "inclusion reason": latestReportEvaluation.reason,
     });
 
     console.info("[Heatmap Debug]", {
       "active period": period,
       "fetched rows": fetchedRows.length,
-      "rows in selected period": rowsInSelectedPeriod.length,
+      "total rows in selected period": rowsInSelectedPeriod.length,
+      "rows in selected period with coordinates": mapped.validCoordinateReports,
+      "rows in selected period without coordinates": missingCoordinateAnalysis.rowsWithoutCoordinates,
       "rows with valid coordinates": mapped.validCoordinateReports,
       "rendered heat points": mapped.points.length,
       "first 3 raw rows": rowsInSelectedPeriod.slice(0, 3),
       "first 3 transformed heat points": transformed,
-      "time filter for Idag": `created_at in ${STOCKHOLM_TIMEZONE}`,
+      "time filter for Idag": `created_at >= ${periodEvaluator.utcBoundaryUsedInFilter} (${STOCKHOLM_TIMEZONE})`,
       "coordinate fields seen at runtime": mapped.coordinateSourceInRuntime,
+      "missing coordinate explanation": missingCoordinateAnalysis.explanation,
       reason,
     });
   }, []);
@@ -256,13 +435,16 @@ export default function MapSection() {
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-secondary text-xs text-muted-foreground font-medium mb-4">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse-slow" />
-            Live – {count} rapporterade incidenter
+            Live - {debug.rowsInSelectedPeriodWithCoordinates} rapporter med platsdata
           </div>
           <h2 className="text-4xl sm:text-5xl font-display font-black text-foreground">
             Incidenter i Sverige
           </h2>
           <p className="mt-3 text-muted-foreground text-base max-w-md mx-auto">
             Heatmap baserad på rapporterade händelser. Rött = hög koncentration.
+          </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {debug.totalRowsInSelectedPeriod} rapporter i vald period - {debug.rowsInSelectedPeriodWithCoordinates} med platsdata som kan visas på kartan
           </p>
         </div>
 
@@ -316,12 +498,21 @@ export default function MapSection() {
           <div className="grid gap-1 text-xs text-muted-foreground">
             <p>active period: {debug.activePeriod}</p>
             <p>fetched rows: {debug.fetchedRows}</p>
-            <p>rows in selected period: {debug.rowsInSelectedPeriod}</p>
+            <p>total rows in selected period: {debug.totalRowsInSelectedPeriod}</p>
+            <p>rows in selected period with coordinates: {debug.rowsInSelectedPeriodWithCoordinates}</p>
+            <p>rows in selected period without coordinates: {debug.rowsInSelectedPeriodWithoutCoordinates}</p>
             <p>rows with valid coordinates: {debug.rowsWithValidCoordinates}</p>
             <p>rendered heat points: {debug.renderedHeatPoints}</p>
             <p>time field: {debug.timeField} ({STOCKHOLM_TIMEZONE} for Idag)</p>
+            <p>now in Europe/Stockholm: {debug.nowInStockholm || "n/a"}</p>
+            <p>start of day in Europe/Stockholm: {debug.startOfDayInStockholm || "n/a"}</p>
+            <p>UTC boundary used in query/filter: {debug.utcBoundaryUsedInFilter || "n/a"}</p>
+            <p>created_at for latest report: {debug.latestReportCreatedAt || "n/a"}</p>
+            <p>whether latest report is included or excluded: {debug.latestReportInclusion || "n/a"}</p>
+            <p>latest report inclusion reason: {debug.latestReportInclusionReason || "n/a"}</p>
             <p>data source: {debug.dataSource}</p>
             <p>coordinate fields in runtime: {debug.coordinateSourceInRuntime.join(", ") || "none"}</p>
+            <p>missing lat/lng analysis: {debug.coordinateGapExplanation || "n/a"}</p>
           </div>
           <pre className="mt-3 text-[11px] text-muted-foreground/90 overflow-x-auto whitespace-pre-wrap">
             {`first 3 raw rows:\n${JSON.stringify(debug.first3RawRows, null, 2)}\n\nfirst 3 transformed heat points:\n${JSON.stringify(debug.first3TransformedHeatPoints, null, 2)}`}
