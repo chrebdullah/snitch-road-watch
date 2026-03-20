@@ -6,6 +6,15 @@ import "leaflet/dist/leaflet.css";
 import "leaflet.heat";
 
 type TimeFilter = "today" | "week" | "month" | "all";
+type CoordField = "latitude" | "longitude" | "lat" | "lng";
+type DataSource = "reports_public" | "reports";
+
+const REQUIRED_COLUMNS = ["id", "created_at"] as const;
+const COORD_COLUMNS: CoordField[] = ["latitude", "longitude", "lat", "lng"];
+const COORDINATE_PAIRS: Array<{ lat: "latitude" | "lat"; lng: "longitude" | "lng" }> = [
+  { lat: "latitude", lng: "longitude" },
+  { lat: "lat", lng: "lng" },
+];
 
 function getFilterStartDate(filter: TimeFilter): Date | null {
   const now = new Date();
@@ -17,6 +26,127 @@ function getFilterStartDate(filter: TimeFilter): Date | null {
     case "month":
       return new Date(now.getTime() - 30 * 86400000);
     default: return null;
+  }
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseMissingColumn(message: string): CoordField | null {
+  const lowered = message.toLowerCase();
+  for (const col of COORD_COLUMNS) {
+    if (lowered.includes(`.${col}`) || lowered.includes(`"${col}"`) || lowered.includes(` ${col} `)) {
+      return col;
+    }
+  }
+  return null;
+}
+
+function summarizeCoordinateColumns(rows: Record<string, unknown>[]): {
+  present: CoordField[];
+  withValues: CoordField[];
+} {
+  const present = new Set<CoordField>();
+  const withValues = new Set<CoordField>();
+  for (const row of rows) {
+    for (const col of COORD_COLUMNS) {
+      if (Object.prototype.hasOwnProperty.call(row, col)) {
+        present.add(col);
+        if (toFiniteNumber(row[col]) !== null) withValues.add(col);
+      }
+    }
+  }
+  return {
+    present: Array.from(present),
+    withValues: Array.from(withValues),
+  };
+}
+
+function mapRowsToPoints(rows: Record<string, unknown>[]): {
+  points: [number, number][];
+  validCoordinateReports: number;
+  coordinatePairsUsed: string[];
+} {
+  const points: [number, number][] = [];
+  let validCoordinateReports = 0;
+  const coordinatePairsUsed = new Set<string>();
+
+  for (const row of rows) {
+    let mapped = false;
+    for (const pair of COORDINATE_PAIRS) {
+      const lat = toFiniteNumber(row[pair.lat]);
+      const lng = toFiniteNumber(row[pair.lng]);
+      if (lat !== null && lng !== null) {
+        points.push([lat, lng]);
+        validCoordinateReports += 1;
+        coordinatePairsUsed.add(`${pair.lat}/${pair.lng}`);
+        mapped = true;
+        break;
+      }
+    }
+
+    if (!mapped) {
+      continue;
+    }
+  }
+
+  return {
+    points,
+    validCoordinateReports,
+    coordinatePairsUsed: Array.from(coordinatePairsUsed),
+  };
+}
+
+async function queryReportsSource(table: DataSource, startIso: string | null) {
+  let selectedCoordColumns = [...COORD_COLUMNS];
+  const removedColumns: CoordField[] = [];
+
+  while (true) {
+    const selectedColumns = [...REQUIRED_COLUMNS, ...selectedCoordColumns].join(", ");
+    const baseQuery = table === "reports_public"
+      ? supabase.from("reports_public")
+      : supabase.from("reports");
+    let query = baseQuery.select(selectedColumns, { count: "exact" });
+    if (startIso) query = query.gte("created_at", startIso);
+
+    const { data, count, error } = await query;
+    if (!error) {
+      return {
+        table,
+        rows: ((data as unknown as Record<string, unknown>[] | null) ?? []),
+        count,
+        usedCoordColumns: selectedCoordColumns,
+        removedColumns,
+        error: null as null,
+      };
+    }
+
+    const missingColumn = parseMissingColumn(error.message ?? "");
+    if (missingColumn && selectedCoordColumns.includes(missingColumn)) {
+      selectedCoordColumns = selectedCoordColumns.filter((col) => col !== missingColumn);
+      removedColumns.push(missingColumn);
+      if (selectedCoordColumns.length === 0) {
+        return {
+          table,
+          rows: [],
+          count: 0,
+          usedCoordColumns: selectedCoordColumns,
+          removedColumns,
+          error,
+        };
+      }
+      continue;
+    }
+
+    return {
+      table,
+      rows: [],
+      count: null,
+      usedCoordColumns: selectedCoordColumns,
+      removedColumns,
+      error,
+    };
   }
 }
 
@@ -74,46 +204,77 @@ export default function MapSection() {
     console.info("[Heatmap] Selected period", { period, reason });
     console.info("[Heatmap] Request params", requestParams);
 
-    let query = supabase
-      .from("reports_public")
-      .select("id, latitude, longitude, created_at", { count: "exact" })
-      .not("latitude", "is", null)
-      .not("longitude", "is", null);
-
-    if (startIso) {
-      query = query.gte("created_at", startIso);
-    }
-
     console.info("[Heatmap] Backend time boundary", {
       filter_column: "created_at",
       created_at_gte: startIso,
       filter_applied: Boolean(startIso),
     });
 
-    const { data, count: total, error } = await query;
+    const sources: DataSource[] = ["reports_public", "reports"];
+    const sourceResults = [];
+    let selectedResult: Awaited<ReturnType<typeof queryReportsSource>> | null = null;
+    let selectedMapped: ReturnType<typeof mapRowsToPoints> | null = null;
+
+    for (const source of sources) {
+      const result = await queryReportsSource(source, startIso);
+      const mapped = mapRowsToPoints(result.rows);
+      const fieldSummary = summarizeCoordinateColumns(result.rows);
+
+      sourceResults.push({
+        source,
+        fetched_rows: result.rows.length,
+        total_count: result.count ?? null,
+        valid_coordinate_reports: mapped.validCoordinateReports,
+        coordinate_fields_present: fieldSummary.present,
+        coordinate_fields_with_values: fieldSummary.withValues,
+        coordinate_pairs_used: mapped.coordinatePairsUsed,
+        points_to_render: mapped.points.length,
+        query_coord_columns: result.usedCoordColumns,
+        removed_coord_columns: result.removedColumns,
+        error_message: result.error?.message ?? null,
+      });
+
+      if (!result.error && mapped.points.length > 0) {
+        selectedResult = result;
+        selectedMapped = mapped;
+        break;
+      }
+
+      if (!result.error && !selectedResult) {
+        selectedResult = result;
+        selectedMapped = mapped;
+      }
+    }
 
     if (requestId !== latestRequestRef.current) {
       console.info("[Heatmap] Ignored stale response", { period, requestId });
       return;
     }
 
-    if (error) {
-      console.error("[Heatmap] Failed to load data", { period, message: error.message });
+    if (!selectedResult || selectedResult.error || !selectedMapped) {
+      console.error("[Heatmap] Failed to load data", {
+        period,
+        source_attempts: sourceResults,
+      });
       return;
     }
 
-    const pts: [number, number][] = (data || [])
-      .filter((r: any) => typeof r.latitude === "number" && typeof r.longitude === "number")
-      .map((r: any) => [r.latitude, r.longitude]);
+    const selectedSourceSummary = sourceResults.find((item) => item.source === selectedResult?.table) ?? null;
+    const pts = selectedMapped.points;
 
-    setCount(total ?? pts.length);
+    setCount(selectedMapped.validCoordinateReports);
     setLivePoints(pts);
 
-    console.info("[Heatmap] Returned points", {
+    console.info("[Heatmap] Coordinate mapping diagnostics", {
       period,
-      returned_rows: data?.length ?? 0,
-      rendered_points: pts.length,
-      total_count: total ?? null,
+      reason,
+      selected_source: selectedResult.table,
+      selected_source_summary: selectedSourceSummary,
+      source_attempts: sourceResults,
+      reports_fetched: selectedResult.rows.length,
+      reports_with_valid_coordinates: selectedMapped.validCoordinateReports,
+      coordinate_fields_found: selectedSourceSummary?.coordinate_fields_present ?? [],
+      points_sent_to_heatmap: pts.length,
     });
   }, []);
 
