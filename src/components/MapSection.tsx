@@ -6,148 +6,95 @@ import "leaflet/dist/leaflet.css";
 import "leaflet.heat";
 
 type TimeFilter = "today" | "week" | "month" | "all";
-type CoordField = "latitude" | "longitude" | "lat" | "lng";
-type DataSource = "reports_public" | "reports";
+const STOCKHOLM_TIMEZONE = "Europe/Stockholm";
 
-const REQUIRED_COLUMNS = ["id", "created_at"] as const;
-const COORD_COLUMNS: CoordField[] = ["latitude", "longitude", "lat", "lng"];
-const COORDINATE_PAIRS: Array<{ lat: "latitude" | "lat"; lng: "longitude" | "lng" }> = [
-  { lat: "latitude", lng: "longitude" },
-  { lat: "lat", lng: "lng" },
-];
+type HeatmapReportRow = {
+  id?: string;
+  created_at?: string | null;
+  latitude?: unknown;
+  longitude?: unknown;
+  lat?: unknown;
+  lng?: unknown;
+  [key: string]: unknown;
+};
 
-function getFilterStartDate(filter: TimeFilter): Date | null {
-  const now = new Date();
-  switch (filter) {
-    case "today":
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    case "week":
-      return new Date(now.getTime() - 7 * 86400000);
-    case "month":
-      return new Date(now.getTime() - 30 * 86400000);
-    default: return null;
-  }
-}
+type HeatmapDebug = {
+  activePeriod: TimeFilter;
+  fetchedRows: number;
+  rowsInSelectedPeriod: number;
+  rowsWithValidCoordinates: number;
+  renderedHeatPoints: number;
+  first3RawRows: HeatmapReportRow[];
+  first3TransformedHeatPoints: Array<{ lat: number; lng: number }>;
+  coordinateSourceInRuntime: string[];
+  dataSource: string;
+  timeField: string;
+};
+
+const stockholmDayFormatter = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: STOCKHOLM_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 function toFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function parseMissingColumn(message: string): CoordField | null {
-  const lowered = message.toLowerCase();
-  for (const col of COORD_COLUMNS) {
-    if (lowered.includes(`.${col}`) || lowered.includes(`"${col}"`) || lowered.includes(` ${col} `)) {
-      return col;
-    }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
   }
   return null;
 }
 
-function summarizeCoordinateColumns(rows: Record<string, unknown>[]): {
-  present: CoordField[];
-  withValues: CoordField[];
-} {
-  const present = new Set<CoordField>();
-  const withValues = new Set<CoordField>();
-  for (const row of rows) {
-    for (const col of COORD_COLUMNS) {
-      if (Object.prototype.hasOwnProperty.call(row, col)) {
-        present.add(col);
-        if (toFiniteNumber(row[col]) !== null) withValues.add(col);
-      }
-    }
-  }
-  return {
-    present: Array.from(present),
-    withValues: Array.from(withValues),
-  };
+function getStockholmDayKey(value: Date): string {
+  return stockholmDayFormatter.format(value);
 }
 
-function mapRowsToPoints(rows: Record<string, unknown>[]): {
+function isRowInSelectedPeriod(createdAt: string, period: TimeFilter): boolean {
+  const rowDate = new Date(createdAt);
+  if (Number.isNaN(rowDate.getTime())) return false;
+
+  if (period === "all") return true;
+
+  if (period === "today") {
+    return getStockholmDayKey(rowDate) === getStockholmDayKey(new Date());
+  }
+
+  const nowMs = Date.now();
+  const days = period === "week" ? 7 : 30;
+  return rowDate.getTime() >= nowMs - days * 86400000;
+}
+
+function mapRowsToPoints(rows: HeatmapReportRow[]): {
   points: [number, number][];
   validCoordinateReports: number;
-  coordinatePairsUsed: string[];
+  coordinateSourceInRuntime: string[];
 } {
   const points: [number, number][] = [];
   let validCoordinateReports = 0;
-  const coordinatePairsUsed = new Set<string>();
+  const coordinateSourceInRuntime = new Set<string>();
 
   for (const row of rows) {
-    let mapped = false;
-    for (const pair of COORDINATE_PAIRS) {
-      const lat = toFiniteNumber(row[pair.lat]);
-      const lng = toFiniteNumber(row[pair.lng]);
-      if (lat !== null && lng !== null) {
-        points.push([lat, lng]);
-        validCoordinateReports += 1;
-        coordinatePairsUsed.add(`${pair.lat}/${pair.lng}`);
-        mapped = true;
-        break;
-      }
-    }
+    const hasLatitudeLongitude =
+      toFiniteNumber(row.latitude) !== null && toFiniteNumber(row.longitude) !== null;
+    const hasLatLng = toFiniteNumber(row.lat) !== null && toFiniteNumber(row.lng) !== null;
+    const lat = toFiniteNumber(row.latitude ?? row.lat);
+    const lng = toFiniteNumber(row.longitude ?? row.lng);
 
-    if (!mapped) {
-      continue;
-    }
+    if (lat === null || lng === null) continue;
+
+    points.push([lat, lng]);
+    validCoordinateReports += 1;
+    if (hasLatitudeLongitude) coordinateSourceInRuntime.add("latitude/longitude");
+    if (hasLatLng) coordinateSourceInRuntime.add("lat/lng");
   }
 
   return {
     points,
     validCoordinateReports,
-    coordinatePairsUsed: Array.from(coordinatePairsUsed),
+    coordinateSourceInRuntime: Array.from(coordinateSourceInRuntime),
   };
-}
-
-async function queryReportsSource(table: DataSource, startIso: string | null) {
-  let selectedCoordColumns = [...COORD_COLUMNS];
-  const removedColumns: CoordField[] = [];
-
-  while (true) {
-    const selectedColumns = [...REQUIRED_COLUMNS, ...selectedCoordColumns].join(", ");
-    const baseQuery = table === "reports_public"
-      ? supabase.from("reports_public")
-      : supabase.from("reports");
-    let query = baseQuery.select(selectedColumns, { count: "exact" });
-    if (startIso) query = query.gte("created_at", startIso);
-
-    const { data, count, error } = await query;
-    if (!error) {
-      return {
-        table,
-        rows: ((data as unknown as Record<string, unknown>[] | null) ?? []),
-        count,
-        usedCoordColumns: selectedCoordColumns,
-        removedColumns,
-        error: null as null,
-      };
-    }
-
-    const missingColumn = parseMissingColumn(error.message ?? "");
-    if (missingColumn && selectedCoordColumns.includes(missingColumn)) {
-      selectedCoordColumns = selectedCoordColumns.filter((col) => col !== missingColumn);
-      removedColumns.push(missingColumn);
-      if (selectedCoordColumns.length === 0) {
-        return {
-          table,
-          rows: [],
-          count: 0,
-          usedCoordColumns: selectedCoordColumns,
-          removedColumns,
-          error,
-        };
-      }
-      continue;
-    }
-
-    return {
-      table,
-      rows: [],
-      count: null,
-      usedCoordColumns: selectedCoordColumns,
-      removedColumns,
-      error,
-    };
-  }
 }
 
 function HeatmapLayer({ points }: { points: [number, number, number][] }) {
@@ -186,6 +133,18 @@ export default function MapSection() {
   const [count, setCount] = useState(0);
   const [filter, setFilter] = useState<TimeFilter>("all");
   const [livePoints, setLivePoints] = useState<[number, number][]>([]);
+  const [debug, setDebug] = useState<HeatmapDebug>({
+    activePeriod: "all",
+    fetchedRows: 0,
+    rowsInSelectedPeriod: 0,
+    rowsWithValidCoordinates: 0,
+    renderedHeatPoints: 0,
+    first3RawRows: [],
+    first3TransformedHeatPoints: [],
+    coordinateSourceInRuntime: [],
+    dataSource: "public.reports",
+    timeField: "created_at",
+  });
   const filterRef = useRef<TimeFilter>(filter);
   const latestRequestRef = useRef(0);
 
@@ -193,88 +152,74 @@ export default function MapSection() {
     const requestId = latestRequestRef.current + 1;
     latestRequestRef.current = requestId;
 
-    const startDate = getFilterStartDate(period);
-    const startIso = startDate ? startDate.toISOString() : null;
-    const requestParams = {
-      period,
-      created_at_gte: startIso,
-      time_field: "created_at",
+    let response: Response;
+    try {
+      const endpoint = new URL("/.netlify/functions/heatmap-reports", window.location.origin).toString();
+      response = await fetch(endpoint, { method: "GET" });
+    } catch (error) {
+      console.error("[Heatmap] Failed to reach heatmap endpoint", {
+        reason,
+        period,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+      return;
+    }
+
+    const payload = await response.json() as {
+      rows?: HeatmapReportRow[];
+      data_source?: string;
+      time_field?: string;
+      error?: string;
     };
 
-    console.info("[Heatmap] Selected period", { period, reason });
-    console.info("[Heatmap] Request params", requestParams);
-
-    console.info("[Heatmap] Backend time boundary", {
-      filter_column: "created_at",
-      created_at_gte: startIso,
-      filter_applied: Boolean(startIso),
-    });
-
-    const sources: DataSource[] = ["reports_public", "reports"];
-    const sourceResults = [];
-    let selectedResult: Awaited<ReturnType<typeof queryReportsSource>> | null = null;
-    let selectedMapped: ReturnType<typeof mapRowsToPoints> | null = null;
-
-    for (const source of sources) {
-      const result = await queryReportsSource(source, startIso);
-      const mapped = mapRowsToPoints(result.rows);
-      const fieldSummary = summarizeCoordinateColumns(result.rows);
-
-      sourceResults.push({
-        source,
-        fetched_rows: result.rows.length,
-        total_count: result.count ?? null,
-        valid_coordinate_reports: mapped.validCoordinateReports,
-        coordinate_fields_present: fieldSummary.present,
-        coordinate_fields_with_values: fieldSummary.withValues,
-        coordinate_pairs_used: mapped.coordinatePairsUsed,
-        points_to_render: mapped.points.length,
-        query_coord_columns: result.usedCoordColumns,
-        removed_coord_columns: result.removedColumns,
-        error_message: result.error?.message ?? null,
+    if (!response.ok) {
+      console.error("[Heatmap] Endpoint error", {
+        period,
+        reason,
+        error: payload?.error || `HTTP ${response.status}`,
       });
-
-      if (!result.error && mapped.points.length > 0) {
-        selectedResult = result;
-        selectedMapped = mapped;
-        break;
-      }
-
-      if (!result.error && !selectedResult) {
-        selectedResult = result;
-        selectedMapped = mapped;
-      }
+      return;
     }
+
+    const fetchedRows = Array.isArray(payload.rows) ? payload.rows : [];
+    const rowsInSelectedPeriod = fetchedRows.filter((row) => {
+      if (!row.created_at || typeof row.created_at !== "string") return false;
+      return isRowInSelectedPeriod(row.created_at, period);
+    });
+    const mapped = mapRowsToPoints(rowsInSelectedPeriod);
+    const transformed = mapped.points.slice(0, 3).map(([lat, lng]) => ({ lat, lng }));
 
     if (requestId !== latestRequestRef.current) {
       console.info("[Heatmap] Ignored stale response", { period, requestId });
       return;
     }
 
-    if (!selectedResult || selectedResult.error || !selectedMapped) {
-      console.error("[Heatmap] Failed to load data", {
-        period,
-        source_attempts: sourceResults,
-      });
-      return;
-    }
+    setCount(mapped.points.length);
+    setLivePoints(mapped.points);
+    setDebug({
+      activePeriod: period,
+      fetchedRows: fetchedRows.length,
+      rowsInSelectedPeriod: rowsInSelectedPeriod.length,
+      rowsWithValidCoordinates: mapped.validCoordinateReports,
+      renderedHeatPoints: mapped.points.length,
+      first3RawRows: rowsInSelectedPeriod.slice(0, 3),
+      first3TransformedHeatPoints: transformed,
+      coordinateSourceInRuntime: mapped.coordinateSourceInRuntime,
+      dataSource: payload.data_source || "public.reports",
+      timeField: payload.time_field || "created_at",
+    });
 
-    const selectedSourceSummary = sourceResults.find((item) => item.source === selectedResult?.table) ?? null;
-    const pts = selectedMapped.points;
-
-    setCount(selectedMapped.validCoordinateReports);
-    setLivePoints(pts);
-
-    console.info("[Heatmap] Coordinate mapping diagnostics", {
-      period,
+    console.info("[Heatmap Debug]", {
+      "active period": period,
+      "fetched rows": fetchedRows.length,
+      "rows in selected period": rowsInSelectedPeriod.length,
+      "rows with valid coordinates": mapped.validCoordinateReports,
+      "rendered heat points": mapped.points.length,
+      "first 3 raw rows": rowsInSelectedPeriod.slice(0, 3),
+      "first 3 transformed heat points": transformed,
+      "time filter for Idag": `created_at in ${STOCKHOLM_TIMEZONE}`,
+      "coordinate fields seen at runtime": mapped.coordinateSourceInRuntime,
       reason,
-      selected_source: selectedResult.table,
-      selected_source_summary: selectedSourceSummary,
-      source_attempts: sourceResults,
-      reports_fetched: selectedResult.rows.length,
-      reports_with_valid_coordinates: selectedMapped.validCoordinateReports,
-      coordinate_fields_found: selectedSourceSummary?.coordinate_fields_present ?? [],
-      points_sent_to_heatmap: pts.length,
     });
   }, []);
 
@@ -364,6 +309,23 @@ export default function MapSection() {
           <div className="text-sm text-muted-foreground">
             Ingen personlig data visas
           </div>
+        </div>
+
+        <div className="rounded-b-2xl border border-t-0 border-border px-6 py-4 bg-card">
+          <p className="text-xs text-muted-foreground mb-2">Heatmap debug</p>
+          <div className="grid gap-1 text-xs text-muted-foreground">
+            <p>active period: {debug.activePeriod}</p>
+            <p>fetched rows: {debug.fetchedRows}</p>
+            <p>rows in selected period: {debug.rowsInSelectedPeriod}</p>
+            <p>rows with valid coordinates: {debug.rowsWithValidCoordinates}</p>
+            <p>rendered heat points: {debug.renderedHeatPoints}</p>
+            <p>time field: {debug.timeField} ({STOCKHOLM_TIMEZONE} for Idag)</p>
+            <p>data source: {debug.dataSource}</p>
+            <p>coordinate fields in runtime: {debug.coordinateSourceInRuntime.join(", ") || "none"}</p>
+          </div>
+          <pre className="mt-3 text-[11px] text-muted-foreground/90 overflow-x-auto whitespace-pre-wrap">
+            {`first 3 raw rows:\n${JSON.stringify(debug.first3RawRows, null, 2)}\n\nfirst 3 transformed heat points:\n${JSON.stringify(debug.first3TransformedHeatPoints, null, 2)}`}
+          </pre>
         </div>
       </div>
     </section>
