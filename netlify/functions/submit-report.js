@@ -261,6 +261,8 @@ async function parseIncomingPayload(event) {
     return {
       reg_number: "",
       address: null,
+      manual_address: null,
+      location_mode: null,
       comment: null,
       latitude: null,
       longitude: null,
@@ -288,11 +290,15 @@ async function parseIncomingPayload(event) {
     const happenedAtRaw = readFormString(form, "happened_at");
     const regNumberRaw = readFormString(form, "reg_number");
     const addressRaw = readFormString(form, "address");
+    const manualAddressRaw = readFormString(form, "manual_address");
+    const locationModeRaw = readFormString(form, "location_mode");
     const commentRaw = readFormString(form, "comment");
 
     return {
       reg_number: regNumberRaw.trim().toUpperCase(),
       address: addressRaw.trim() || null,
+      manual_address: manualAddressRaw.trim() || null,
+      location_mode: locationModeRaw.trim() || null,
       comment: commentRaw.trim() || null,
       latitude: parseOptionalNumber(latRaw),
       longitude: parseOptionalNumber(lngRaw),
@@ -307,6 +313,8 @@ async function parseIncomingPayload(event) {
   const payload = JSON.parse(event.body || "{}");
   const regNumber = payload.reg_number?.trim().toUpperCase() ?? "";
   const address = payload.address?.trim() || null;
+  const manualAddress = payload.manual_address?.trim() || null;
+  const locationMode = payload.location_mode?.trim() || null;
   const comment = payload.comment?.trim() || null;
   const latitude = parseOptionalNumber(payload.latitude ?? payload.lat);
   const longitude = parseOptionalNumber(payload.longitude ?? payload.lng);
@@ -314,6 +322,8 @@ async function parseIncomingPayload(event) {
   return {
     reg_number: regNumber,
     address,
+    manual_address: manualAddress,
+    location_mode: locationMode,
     comment,
     latitude,
     longitude,
@@ -548,7 +558,10 @@ export const handler = async (event) => {
   }
 
   const regNumber = payload.reg_number;
-  let address = payload.address;
+  const manualAddress = normalizeText(payload.manual_address) || null;
+  const selectedLocationMode = normalizeText(payload.location_mode) || null;
+  const submittedAddress = normalizeText(payload.address) || null;
+  let address = manualAddress || submittedAddress;
   const comment = payload.comment;
   const latitude = payload.latitude;
   const longitude = payload.longitude;
@@ -565,7 +578,7 @@ export const handler = async (event) => {
     return jsonResponse(400, { error: "Plats saknas. Tillåt GPS eller skriv adress." });
   }
 
-  if (latitude !== null && longitude !== null && !address) {
+  if (latitude !== null && longitude !== null && !manualAddress && !address) {
     const geocoded = await reverseGeocodeWithNominatim(latitude, longitude, requestId);
     if (geocoded) {
       address = normalizeText(geocoded.address) || null;
@@ -577,6 +590,10 @@ export const handler = async (event) => {
 
   if (!address && latitude !== null && longitude !== null) {
     address = `GPS ${formatCoordinateLabel(latitude, longitude)}`;
+  }
+
+  if (selectedLocationMode === "manual" && manualAddress) {
+    address = manualAddress;
   }
 
   const happenedOn = toDateOnlyIso(happenedAt);

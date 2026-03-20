@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Camera, MapPin, Upload, CheckCircle, Smartphone, AlertCircle, X } from "lucide-react";
 
 type Status = "idle" | "uploading" | "success" | "error";
+type LocationMode = "gps" | "manual";
 const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
 
 const SWISH_DEEP_LINK =
@@ -15,7 +16,8 @@ export default function Rapportera() {
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [address, setAddress] = useState("");
+  const [locationMode, setLocationMode] = useState<LocationMode>("gps");
+  const [manualAddress, setManualAddress] = useState("");
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
   const [happenedNow, setHappenedNow] = useState(true);
   const [happenedAt, setHappenedAt] = useState("");
@@ -122,13 +124,23 @@ export default function Rapportera() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const trimmedManualAddress = manualAddress.trim();
+    const manualAddressProvided = trimmedManualAddress.length > 0;
+    const preferredLocationMode: LocationMode = manualAddressProvided ? "manual" : locationMode;
+    const addressToSend = manualAddressProvided ? trimmedManualAddress : "";
+
     if (!regNumber.trim()) {
       setErrorMsg("Registreringsnummer krävs.");
       return;
     }
 
-    if (!location && !address.trim()) {
+    if (!location && !manualAddressProvided) {
       setErrorMsg("Plats krävs. Tillåt GPS eller ange adress.");
+      return;
+    }
+
+    if (preferredLocationMode === "manual" && !manualAddressProvided) {
+      setErrorMsg("Ange en manuell adress eller byt tillbaka till GPS-plats.");
       return;
     }
 
@@ -148,7 +160,9 @@ export default function Rapportera() {
       formData.append("comment", comment.trim());
       formData.append("lat", location?.lat?.toString() ?? "");
       formData.append("lng", location?.lng?.toString() ?? "");
-      formData.append("address", address.trim());
+      formData.append("address", addressToSend);
+      formData.append("manual_address", trimmedManualAddress);
+      formData.append("location_mode", preferredLocationMode);
       formData.append("happened_at", happenedAtIso);
       if (file) {
         formData.append("image", file);
@@ -215,7 +229,8 @@ export default function Rapportera() {
               setRegNumber("");
               setHappenedNow(true);
               setHappenedAt("");
-              setAddress("");
+              setLocationMode("gps");
+              setManualAddress("");
               setErrorMsg("");
             }}
             className="px-6 py-3 min-h-[48px] border border-border text-muted-foreground text-sm font-medium rounded-full hover:border-foreground/30 hover:text-foreground transition-all"
@@ -266,6 +281,31 @@ export default function Rapportera() {
             <label className="text-xs text-muted-foreground font-medium uppercase tracking-widest">
               Plats *
             </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setLocationMode("gps")}
+                className={`px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${
+                  locationMode === "gps"
+                    ? "border-accent-brand bg-accent-brand/10 text-accent-brand"
+                    : "border-border text-muted-foreground"
+                }`}
+              >
+                Använd min nuvarande plats
+              </button>
+              <button
+                type="button"
+                onClick={() => setLocationMode("manual")}
+                className={`px-4 py-3.5 min-h-[48px] rounded-xl border text-sm font-medium transition-all ${
+                  locationMode === "manual"
+                    ? "border-accent-brand bg-accent-brand/10 text-accent-brand"
+                    : "border-border text-muted-foreground"
+                }`}
+              >
+                Ange annan plats manuellt
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={requestLocation}
@@ -280,19 +320,38 @@ export default function Rapportera() {
               <MapPin size={16} />
               {locationStatus === "idle" && "Hämta GPS-plats"}
               {locationStatus === "loading" && "Hämtar..."}
-              {locationStatus === "granted" && "✓ Plats registrerad"}
-              {locationStatus === "denied" && "GPS ej tillgänglig – ange adress nedan"}
+              {locationStatus === "granted" && "✓ GPS-plats hämtad (förslag)"}
+              {locationStatus === "denied" && "GPS ej tillgänglig"}
             </button>
 
-            {locationStatus === "denied" && (
+            {locationMode === "gps" && (
+              <button
+                type="button"
+                onClick={() => setLocationMode("manual")}
+                className="w-full px-4 py-3 min-h-[48px] rounded-xl border border-border text-sm font-medium text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-all"
+              >
+                Ändra plats
+              </button>
+            )}
+
+            {(locationMode === "manual" || manualAddress.trim().length > 0 || locationStatus === "denied") && (
               <input
                 type="text"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                value={manualAddress}
+                onChange={(e) => setManualAddress(e.target.value)}
                 placeholder="T.ex. Sveavägen, Stockholm"
                 className="w-full bg-secondary border border-border rounded-xl px-4 py-3.5 min-h-[48px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-foreground/30 transition-colors"
               />
             )}
+
+            <p className="text-xs text-muted-foreground/80">
+              Plats som skickas:{" "}
+              {manualAddress.trim()
+                ? `Manuell adress (${manualAddress.trim()})`
+                : location
+                  ? `Nuvarande GPS (${location.lat.toFixed(5)}, ${location.lng.toFixed(5)})`
+                  : "Ingen plats vald ännu"}
+            </p>
           </div>
 
           <div className="space-y-2">
