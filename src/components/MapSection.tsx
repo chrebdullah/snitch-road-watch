@@ -271,6 +271,7 @@ function UserLocation() {
 }
 
 export default function MapSection() {
+  const showHeatmapDebug = import.meta.env.DEV || import.meta.env.VITE_HEATMAP_DEBUG === "true";
   const [filter, setFilter] = useState<TimeFilter>("all");
   const [livePoints, setLivePoints] = useState<[number, number][]>([]);
   const [debug, setDebug] = useState<HeatmapDebug>({
@@ -493,31 +494,33 @@ export default function MapSection() {
           </div>
         </div>
 
-        <div className="rounded-b-2xl border border-t-0 border-border px-6 py-4 bg-card">
-          <p className="text-xs text-muted-foreground mb-2">Heatmap debug</p>
-          <div className="grid gap-1 text-xs text-muted-foreground">
-            <p>active period: {debug.activePeriod}</p>
-            <p>fetched rows: {debug.fetchedRows}</p>
-            <p>total rows in selected period: {debug.totalRowsInSelectedPeriod}</p>
-            <p>rows in selected period with coordinates: {debug.rowsInSelectedPeriodWithCoordinates}</p>
-            <p>rows in selected period without coordinates: {debug.rowsInSelectedPeriodWithoutCoordinates}</p>
-            <p>rows with valid coordinates: {debug.rowsWithValidCoordinates}</p>
-            <p>rendered heat points: {debug.renderedHeatPoints}</p>
-            <p>time field: {debug.timeField} ({STOCKHOLM_TIMEZONE} for Idag)</p>
-            <p>now in Europe/Stockholm: {debug.nowInStockholm || "n/a"}</p>
-            <p>start of day in Europe/Stockholm: {debug.startOfDayInStockholm || "n/a"}</p>
-            <p>UTC boundary used in query/filter: {debug.utcBoundaryUsedInFilter || "n/a"}</p>
-            <p>created_at for latest report: {debug.latestReportCreatedAt || "n/a"}</p>
-            <p>whether latest report is included or excluded: {debug.latestReportInclusion || "n/a"}</p>
-            <p>latest report inclusion reason: {debug.latestReportInclusionReason || "n/a"}</p>
-            <p>data source: {debug.dataSource}</p>
-            <p>coordinate fields in runtime: {debug.coordinateSourceInRuntime.join(", ") || "none"}</p>
-            <p>missing lat/lng analysis: {debug.coordinateGapExplanation || "n/a"}</p>
+        {showHeatmapDebug && (
+          <div className="rounded-b-2xl border border-t-0 border-border px-6 py-4 bg-card">
+            <p className="text-xs text-muted-foreground mb-2">Heatmap debug</p>
+            <div className="grid gap-1 text-xs text-muted-foreground">
+              <p>active period: {debug.activePeriod}</p>
+              <p>fetched rows: {debug.fetchedRows}</p>
+              <p>total rows in selected period: {debug.totalRowsInSelectedPeriod}</p>
+              <p>rows in selected period with coordinates: {debug.rowsInSelectedPeriodWithCoordinates}</p>
+              <p>rows in selected period without coordinates: {debug.rowsInSelectedPeriodWithoutCoordinates}</p>
+              <p>rows with valid coordinates: {debug.rowsWithValidCoordinates}</p>
+              <p>rendered heat points: {debug.renderedHeatPoints}</p>
+              <p>time field: {debug.timeField} ({STOCKHOLM_TIMEZONE} for Idag)</p>
+              <p>now in Europe/Stockholm: {debug.nowInStockholm || "n/a"}</p>
+              <p>start of day in Europe/Stockholm: {debug.startOfDayInStockholm || "n/a"}</p>
+              <p>UTC boundary used in query/filter: {debug.utcBoundaryUsedInFilter || "n/a"}</p>
+              <p>created_at for latest report: {debug.latestReportCreatedAt || "n/a"}</p>
+              <p>whether latest report is included or excluded: {debug.latestReportInclusion || "n/a"}</p>
+              <p>latest report inclusion reason: {debug.latestReportInclusionReason || "n/a"}</p>
+              <p>data source: {debug.dataSource}</p>
+              <p>coordinate fields in runtime: {debug.coordinateSourceInRuntime.join(", ") || "none"}</p>
+              <p>missing lat/lng analysis: {debug.coordinateGapExplanation || "n/a"}</p>
+            </div>
+            <pre className="mt-3 text-[11px] text-muted-foreground/90 overflow-x-auto whitespace-pre-wrap">
+              {`first 3 raw rows:\n${JSON.stringify(debug.first3RawRows, null, 2)}\n\nfirst 3 transformed heat points:\n${JSON.stringify(debug.first3TransformedHeatPoints, null, 2)}`}
+            </pre>
           </div>
-          <pre className="mt-3 text-[11px] text-muted-foreground/90 overflow-x-auto whitespace-pre-wrap">
-            {`first 3 raw rows:\n${JSON.stringify(debug.first3RawRows, null, 2)}\n\nfirst 3 transformed heat points:\n${JSON.stringify(debug.first3TransformedHeatPoints, null, 2)}`}
-          </pre>
-        </div>
+        )}
       </div>
     </section>
   );
