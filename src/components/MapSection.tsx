@@ -1,29 +1,21 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet.heat";
 
-const SEED_INCIDENTS: [number, number][] = [
-  [59.3293, 18.0686], [59.3500, 18.0200], [59.3100, 18.0900], [59.3700, 18.0000], [59.2800, 18.1100],
-  [57.7089, 11.9746], [57.7200, 11.9500], [57.6900, 11.9900], [57.7400, 12.0000],
-  [55.6050, 13.0038], [55.6200, 12.9800], [55.5900, 13.0200],
-  [59.8586, 17.6389], [59.8700, 17.6200],
-  [58.4108, 15.6214], [58.4200, 15.6100],
-  [63.8258, 20.2630], [63.8300, 20.2500],
-  [65.5848, 22.1547],
-  [62.3908, 17.3069],
-];
-
 type TimeFilter = "today" | "week" | "month" | "all";
 
-function getFilterDate(filter: TimeFilter): Date | null {
+function getFilterStartDate(filter: TimeFilter): Date | null {
   const now = new Date();
   switch (filter) {
-    case "today": return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    case "week": return new Date(now.getTime() - 7 * 86400000);
-    case "month": return new Date(now.getTime() - 30 * 86400000);
+    case "today":
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    case "week":
+      return new Date(now.getTime() - 7 * 86400000);
+    case "month":
+      return new Date(now.getTime() - 30 * 86400000);
     default: return null;
   }
 }
@@ -61,39 +53,88 @@ function UserLocation() {
 }
 
 export default function MapSection() {
-  const [count, setCount] = useState(21);
+  const [count, setCount] = useState(0);
   const [filter, setFilter] = useState<TimeFilter>("all");
   const [livePoints, setLivePoints] = useState<[number, number][]>([]);
+  const filterRef = useRef<TimeFilter>(filter);
+  const latestRequestRef = useRef(0);
+
+  const fetchHeatmapData = useCallback(async (period: TimeFilter, reason: "filter-change" | "realtime-insert") => {
+    const requestId = latestRequestRef.current + 1;
+    latestRequestRef.current = requestId;
+
+    const startDate = getFilterStartDate(period);
+    const startIso = startDate ? startDate.toISOString() : null;
+    const requestParams = {
+      period,
+      created_at_gte: startIso,
+      time_field: "created_at",
+    };
+
+    console.info("[Heatmap] Selected period", { period, reason });
+    console.info("[Heatmap] Request params", requestParams);
+
+    let query = supabase
+      .from("reports_public")
+      .select("id, latitude, longitude, created_at", { count: "exact" })
+      .not("latitude", "is", null)
+      .not("longitude", "is", null);
+
+    if (startIso) {
+      query = query.gte("created_at", startIso);
+    }
+
+    console.info("[Heatmap] Backend time boundary", {
+      filter_column: "created_at",
+      created_at_gte: startIso,
+      filter_applied: Boolean(startIso),
+    });
+
+    const { data, count: total, error } = await query;
+
+    if (requestId !== latestRequestRef.current) {
+      console.info("[Heatmap] Ignored stale response", { period, requestId });
+      return;
+    }
+
+    if (error) {
+      console.error("[Heatmap] Failed to load data", { period, message: error.message });
+      return;
+    }
+
+    const pts: [number, number][] = (data || [])
+      .filter((r: any) => typeof r.latitude === "number" && typeof r.longitude === "number")
+      .map((r: any) => [r.latitude, r.longitude]);
+
+    setCount(total ?? pts.length);
+    setLivePoints(pts);
+
+    console.info("[Heatmap] Returned points", {
+      period,
+      returned_rows: data?.length ?? 0,
+      rendered_points: pts.length,
+      total_count: total ?? null,
+    });
+  }, []);
 
   useEffect(() => {
-    const fetchData = async () => {
-      const { data, count: total } = await supabase
-        .from("reports_public")
-        .select("id, latitude, longitude", { count: "exact" })
-        .not("latitude", "is", null);
+    filterRef.current = filter;
+    void fetchHeatmapData(filter, "filter-change");
+  }, [fetchHeatmapData, filter]);
 
-      setCount(Math.max(total ?? 0, 21));
-      const pts: [number, number][] = (data || [])
-        .filter((r: any) => r.latitude && r.longitude)
-        .map((r: any) => [r.latitude, r.longitude]);
-      setLivePoints(pts);
-    };
-    fetchData();
-
-    // Realtime subscription
+  useEffect(() => {
     const channel = supabase
       .channel("reports-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "reports" }, () => {
-        fetchData();
+        void fetchHeatmapData(filterRef.current, "realtime-insert");
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [fetchHeatmapData]);
 
   const heatPoints: [number, number, number][] = useMemo(() => {
-    const all = [...SEED_INCIDENTS, ...livePoints];
-    return all.map(([lat, lng]) => [lat, lng, 0.6]);
+    return livePoints.map(([lat, lng]) => [lat, lng, 0.6]);
   }, [livePoints]);
 
   const filters: { key: TimeFilter; label: string }[] = [
