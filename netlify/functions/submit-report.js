@@ -99,6 +99,11 @@ function parseOptionalNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function coalesceCoordinate(primary, fallback) {
+  if (primary !== null) return primary;
+  return fallback;
+}
+
 function readFormString(form, key) {
   const value = form.get(key);
   return typeof value === "string" ? value : "";
@@ -266,6 +271,8 @@ async function parseIncomingPayload(event) {
       comment: null,
       latitude: null,
       longitude: null,
+      lat: null,
+      lng: null,
       happened_at: null,
       file: null,
       file_name: null,
@@ -287,12 +294,20 @@ async function parseIncomingPayload(event) {
 
     const latRaw = readFormString(form, "lat") || readFormString(form, "latitude");
     const lngRaw = readFormString(form, "lng") || readFormString(form, "longitude");
+    const latitudeRaw = readFormString(form, "latitude");
+    const longitudeRaw = readFormString(form, "longitude");
+    const latOnlyRaw = readFormString(form, "lat");
+    const lngOnlyRaw = readFormString(form, "lng");
     const happenedAtRaw = readFormString(form, "happened_at");
     const regNumberRaw = readFormString(form, "reg_number");
     const addressRaw = readFormString(form, "address");
     const manualAddressRaw = readFormString(form, "manual_address");
     const locationModeRaw = readFormString(form, "location_mode");
     const commentRaw = readFormString(form, "comment");
+    const latitude = coalesceCoordinate(parseOptionalNumber(latitudeRaw), parseOptionalNumber(latRaw));
+    const longitude = coalesceCoordinate(parseOptionalNumber(longitudeRaw), parseOptionalNumber(lngRaw));
+    const lat = parseOptionalNumber(latOnlyRaw);
+    const lng = parseOptionalNumber(lngOnlyRaw);
 
     return {
       reg_number: regNumberRaw.trim().toUpperCase(),
@@ -300,8 +315,10 @@ async function parseIncomingPayload(event) {
       manual_address: manualAddressRaw.trim() || null,
       location_mode: locationModeRaw.trim() || null,
       comment: commentRaw.trim() || null,
-      latitude: parseOptionalNumber(latRaw),
-      longitude: parseOptionalNumber(lngRaw),
+      latitude,
+      longitude,
+      lat,
+      lng,
       happened_at: happenedAtRaw.trim() || null,
       file,
       file_name: file?.name || null,
@@ -316,8 +333,12 @@ async function parseIncomingPayload(event) {
   const manualAddress = payload.manual_address?.trim() || null;
   const locationMode = payload.location_mode?.trim() || null;
   const comment = payload.comment?.trim() || null;
-  const latitude = parseOptionalNumber(payload.latitude ?? payload.lat);
-  const longitude = parseOptionalNumber(payload.longitude ?? payload.lng);
+  const latitudeFromLatitude = parseOptionalNumber(payload.latitude);
+  const longitudeFromLongitude = parseOptionalNumber(payload.longitude);
+  const lat = parseOptionalNumber(payload.lat);
+  const lng = parseOptionalNumber(payload.lng);
+  const latitude = coalesceCoordinate(latitudeFromLatitude, lat);
+  const longitude = coalesceCoordinate(longitudeFromLongitude, lng);
 
   return {
     reg_number: regNumber,
@@ -327,6 +348,8 @@ async function parseIncomingPayload(event) {
     comment,
     latitude,
     longitude,
+    lat,
+    lng,
     happened_at: typeof payload.happened_at === "string" ? payload.happened_at.trim() || null : null,
     file: null,
     file_name: null,
@@ -417,11 +440,16 @@ function resolveNotificationRecipients(requestId) {
   };
 }
 
-async function insertAdaptiveRecord(supabase, record) {
+async function insertAdaptiveRecord(supabase, record, requestId, schemaLabel) {
   const candidate = { ...record };
   let lastError = null;
 
   for (let attempt = 0; attempt < 12; attempt += 1) {
+    console.info(`[${requestId}] reports insert attempt`, {
+      schema: schemaLabel,
+      attempt: attempt + 1,
+      payload: candidate,
+    });
     const { data, error } = await supabase.from("reports").insert(candidate).select("id").single();
     if (!error) {
       return { data, error: null, usedRecord: candidate };
@@ -440,26 +468,12 @@ async function insertAdaptiveRecord(supabase, record) {
   return { data: null, error: lastError, usedRecord: candidate };
 }
 
-async function insertReportWithSchemaFallback(supabase, baseRecord) {
-  const modernRecord = {
+async function insertReportWithSchemaFallback(supabase, baseRecord, requestId) {
+  const adaptiveRecord = {
     reg_number: baseRecord.reg_number,
     masked_reg: baseRecord.masked_reg,
     latitude: baseRecord.latitude,
     longitude: baseRecord.longitude,
-    address: baseRecord.address,
-    city: baseRecord.city,
-    locality: baseRecord.locality,
-    municipality: baseRecord.municipality,
-    comment: baseRecord.comment,
-    happened_on: baseRecord.happened_on,
-    media_url: baseRecord.media_path,
-    approved: true,
-    source: "web",
-  };
-
-  const legacyRecord = {
-    reg_number: baseRecord.reg_number,
-    masked_reg: baseRecord.masked_reg,
     lat: baseRecord.latitude,
     lng: baseRecord.longitude,
     address: baseRecord.address,
@@ -468,6 +482,7 @@ async function insertReportWithSchemaFallback(supabase, baseRecord) {
     municipality: baseRecord.municipality,
     comment: baseRecord.comment,
     happened_on: baseRecord.happened_on,
+    media_url: baseRecord.media_path,
     image_url: baseRecord.media_path,
     approved: true,
     source: "web",
@@ -480,14 +495,13 @@ async function insertReportWithSchemaFallback(supabase, baseRecord) {
   };
 
   const attempts = [
-    { schema: "modern", record: modernRecord },
-    { schema: "legacy", record: legacyRecord },
+    { schema: "adaptive", record: adaptiveRecord },
     { schema: "minimal", record: minimalRecord },
   ];
 
   let lastError = null;
   for (const attempt of attempts) {
-    const { data, error, usedRecord } = await insertAdaptiveRecord(supabase, attempt.record);
+    const { data, error, usedRecord } = await insertAdaptiveRecord(supabase, attempt.record, requestId, attempt.schema);
     if (!error) {
       return { data, error: null, schema: attempt.schema, fields: Object.keys(usedRecord) };
     }
@@ -565,10 +579,22 @@ export const handler = async (event) => {
   const comment = payload.comment;
   const latitude = payload.latitude;
   const longitude = payload.longitude;
+  const lat = payload.lat;
+  const lng = payload.lng;
   const happenedAt = payload.happened_at;
   let city = null;
   let locality = null;
   let municipality = null;
+
+  console.info(`[${requestId}] submit-report location payload`, {
+    location_mode: selectedLocationMode,
+    latitude,
+    longitude,
+    lat,
+    lng,
+    address: submittedAddress,
+    manual_address: manualAddress,
+  });
 
   if (!regNumber) {
     return jsonResponse(400, { error: "Registreringsnummer saknas." });
@@ -662,7 +688,7 @@ export const handler = async (event) => {
       });
     }
 
-    const { data: insertedReport, error: insertError, schema: insertSchema, fields: insertFields } = await insertReportWithSchemaFallback(supabase, {
+    const reportInsertPayload = {
       reg_number: regNumber,
       masked_reg: maskRegNumber(regNumber),
       latitude,
@@ -674,7 +700,12 @@ export const handler = async (event) => {
       comment,
       happened_on: happenedOn,
       media_path: mediaPath,
-    });
+    };
+
+    console.info(`[${requestId}] final reports payload before insert`, reportInsertPayload);
+
+    const { data: insertedReport, error: insertError, schema: insertSchema, fields: insertFields } =
+      await insertReportWithSchemaFallback(supabase, reportInsertPayload, requestId);
 
     if (insertError) {
       return jsonResponse(500, {
